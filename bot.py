@@ -7,7 +7,8 @@ import telebot
 from cloudscraper import create_scraper
 from bs4 import BeautifulSoup
 
-BOT_TOKEN = 9179820997:AAHRG341kcM39sD64VTI1Ro8WQpDKz899r4
+# Yahan apna BotFather wala sahi token daalein (quotes ke andar)
+BOT_TOKEN = '9179820997:AAHRG341kcM39sD64VTI1Ro8WQpDKz899r4'
 BASE_URL = 'https://animesalt.cx'
 
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -36,7 +37,7 @@ def extract_abyss_links(anime_query):
             return None, "Website tak pahunchne mein dikkat aa rahi hai."
             
         soup = BeautifulSoup(search_res.text, "html.parser")
-        first_result = soup.select_one("article a.result-item a, post-title a, h2 a, .items .item a")
+        first_result = soup.select_one("article a, .result-item a, .post-title a, h2 a, .items .item a")
         
         if not first_result or not first_result.get("href"):
             return None, "Is naam se koi anime nahi mila."
@@ -63,13 +64,13 @@ def extract_abyss_links(anime_query):
                     if val:
                         found_players.append((ep_url, val))
                         
-        for ep_in_soup in ep_soup.find_all("span", "div"):
-            if "server" in str(ep_in_soup).lower():
-                onclick = ep_in_soup.get("onclick", "")
-                if "http" in onclick:
-                    match = re.search(r"https?://[^\s\"']+", onclick)
-                    if match:
-                        found_players.append((ep_url, match.group(0)))
+            for ep_in_soup in ep_soup.find_all(["span", "div"]):
+                if "server" in str(ep_in_soup).lower():
+                    onclick = ep_in_soup.get("onclick", "")
+                    if "http" in onclick:
+                        match = re.search(r"https?://[^\s\"']+", onclick)
+                        if match:
+                            found_players.append((ep_url, match.group(0)))
                         
         return anime_page_url, found_players
         
@@ -117,4 +118,4 @@ def handle_anime_search(message):
 if __name__ == "__main__":
     threading.Thread(target=run_web, daemon=True).start()
     bot.infinity_polling(skip_pending=True)
-
+                
