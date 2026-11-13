@@ -8,7 +8,7 @@ from cloudscraper import create_scraper
 from bs4 import BeautifulSoup
 
 # Yahan apna BotFather wala sahi token daalein (quotes ke andar)
-BOT_TOKEN = '9179820997:AAHRG341kcM39sD64VTI1Ro8WQpDKz899r4'
+BOT_TOKEN = '9179820997:AAGflG5V5PvW7PHjlQ3rzcSQU3i4hb3Q3Fc'
 BASE_URL = 'https://animesalt.cx'
 
 bot = telebot.TeleBot(BOT_TOKEN)
