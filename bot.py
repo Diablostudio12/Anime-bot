@@ -11,7 +11,7 @@ BOT_TOKEN = "9179820997:AAHRG341kcM39sD64VTI1Ro8WQpDKz899r4"
 BASE_URL = "https://animesalt.cx"
 
 bot = telebot.TeleBot(BOT_TOKEN)
-scraper = cloudscraper.create_scraper(
+scraper = cloudscraper.create_scraper(headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'},
     browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False}
 )
 
