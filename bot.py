@@ -117,5 +117,5 @@ def handle_anime_search(message):
 
 if __name__ == "__main__":
     threading.Thread(target=run_web, daemon=True).start()
-    bot.infinity_polling(skip_pending=True)
+    bot.polling(none_stop=True)
                 
