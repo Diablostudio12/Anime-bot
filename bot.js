@@ -20,12 +20,18 @@ function isAllowedAnimeHost(hostname) {
   return ALLOWED_ANIME_DOMAINS.includes(String(hostname || "").toLowerCase());
 }
 
-const token = process.env.TELEGRAM_BOT_TOKEN;
+const token = process.argv[2] || process.env.TELEGRAM_BOT_TOKEN;
 const ownerId = process.env.TELEGRAM_OWNER_ID;
 if (!token || !/^\d+$/.test(ownerId || "")) {
   throw new Error("Check your TELEGRAM_BOT_TOKEN and TELEGRAM_OWNER_ID in .env");
 }
 const bot = new Bot(token);
+
+bot.init().then(() => {
+  console.log(`🤖 Bot active as @${bot.botInfo.username} (ID: ${bot.botInfo.id})`);
+}).catch((err) => {
+  console.warn("⚠️ Bot init warning:", err.message);
+});
 
 // Telegram rate limit resilience: auto-retries when hitting Telegram limits
 bot.api.config.use(autoRetry({
@@ -1714,7 +1720,7 @@ bot.on("message:text", async (ctx) => {
   );
 });
 // Phase 12: local heartbeat-based container health and graceful termination.
-const HEALTH_FILE = path.join(DATA_DIR, "runtime-health.json");
+const HEALTH_FILE = path.join(DATA_DIR, `runtime-health-${process.pid}.json`);
 const STARTED_AT = new Date().toISOString();
 let shuttingDown = false;
 let activeMode = "starting";
