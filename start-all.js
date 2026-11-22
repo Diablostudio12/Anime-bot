@@ -89,6 +89,14 @@ const healthServer = http.createServer((req, res) => {
   }));
 });
 
+healthServer.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.warn(`⚠️ Port ${PORT} already bound; running bots in background mode.`);
+  } else {
+    console.error("Health server error:", err.message);
+  }
+});
+
 healthServer.listen(PORT, "0.0.0.0", () => {
   console.log(`🌐 Web Service Health Server active on port ${PORT} (Render 24/7 ready)`);
 });
