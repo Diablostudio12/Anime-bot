@@ -510,21 +510,9 @@ async function handleEpisode(ctx) {
 
     const hostMirror = String(mirrorResult.sourceMirror || "animesalt.cx").replace(/\s*\(.*?\)/, "").trim();
     const episodeUrl = `https://${hostMirror}/episode/${slug}-${season}x${episode}/`;
-    const linksFormatted = mirrorResult.links
-      .map(item => `• *${item.language}*: \`${item.playerUrl || item.link}\``)
-      .join("\n\n");
 
-    const speedBadge = mirrorResult.cached ? "⚡ 0.05ms (RAM Cache)" : `🚀 ${mirrorResult.responseTimeMs || 180}ms (${mirrorResult.sourceMirror})`;
-
-    const navKeyboard = new InlineKeyboard();
-    
-    // Add direct streaming URL buttons for instant 1-click playback
-    for (const item of mirrorResult.links) {
-      const pUrl = item.playerUrl || item.link;
-      if (pUrl && /^https?:\/\//i.test(pUrl)) {
-        navKeyboard.url(`▶️ Stream ${item.language || "HD"}`, pUrl).row();
-      }
-    }
+    const navKeyboard = new InlineKeyboard()
+      .url("🌐 Watch Episode in Web Player", episodeUrl).row();
 
     if (episode > 1) {
       navKeyboard.text(`◀️ Ep ${episode - 1}`, `play:${slug}:${season}:${episode - 1}`);
@@ -532,14 +520,17 @@ async function handleEpisode(ctx) {
     navKeyboard.text("📜 All Episodes", `season:${slug}:${season}`);
     navKeyboard.text(`Ep ${episode + 1} ▶️`, `play:${slug}:${season}:${episode + 1}`);
 
+    const languagesAvailable = mirrorResult.links.map(l => l.language).filter(Boolean).join(", ") || "Hindi, Japanese";
+
     await ctx.reply(
       `🎬 *${anime}*\n` +
       `Season ${season} • Episode ${episode}\n\n` +
-      `🔒 *Vault Status*: Video abhi Vault me process ho rahi hai. @RyvanStorageUploaderBot isko queue me daal raha hai.\n` +
-      `⚡ *Instant Playback*: Aap bina wait kiye neeche *Stream* button se direct dekh sakte hain!\n\n` +
-      `⏱️ *Speed*: ${speedBadge}\n` +
-      `📄 *Episode Page*: [Direct Web Link](${episodeUrl})\n\n` +
-      `🔗 *Player Links:*\n${linksFormatted}` +
+      `📁 *Ryvan Secret Vault Status:*\n` +
+      `Yeh video abhi tak Secret Vault channel me upload nahi hui hai.\n\n` +
+      `🌐 *Web Player (No Redirect):*\n` +
+      `Aap neeche button par click karke direct episode dekh sakte hain (Available: ${languagesAvailable}).\n\n` +
+      `💡 *Direct Video Kaise Milegi?*\n` +
+      `Jaise hi admin ya uploader is episode ko [Ryvan Secret Vault](https://t.me/+-bQqzM9y6rQ2Mzg1) me post karega, yeh bot direct full HD video file DM me bhejna shuru kar dega!` +
       cooldownNotice,
       {
         parse_mode: "Markdown",
