@@ -1,0 +1,23 @@
+# Environment and Secrets
+.env
+.env.local
+.env.*
+!.env.example
+*.session
+*.session-journal
+
+# Python
+__pycache__/
+*.pyc
+
+# Dependencies
+node_modules/
+
+# Local state, database and runtime logs
+ryvan-data/
+*.log
+*.tmp
+
+# System files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,25 @@
+{
+  "name": "ryvan-anime-community",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node bot.js",
+    "uploader": "node uploader.js",
+    "start:all": "node start-all.js",
+    "check": "node --check bot.js && node --check uploader.js && node --check start-all.js",
+    "test": "node test-subscription.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@google/genai": "^1.0.0",
+    "@grammyjs/auto-retry": "^2.0.2",
+    "@grammyjs/runner": "^2.0.3",
+    "cheerio": "^1.0.0",
+    "dotenv": "^16.0.0",
+    "grammy": "^1.38.0",
+    "undici": "^8.12.4"
+  }
+}
