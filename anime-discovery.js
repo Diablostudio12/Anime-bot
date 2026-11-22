@@ -34,6 +34,14 @@ function saveSeriesCache() {
   } catch {}
 }
 
+function getFetchUrl(targetUrl) {
+  const proxy = process.env.CF_PROXY_URL ? process.env.CF_PROXY_URL.trim().replace(/\/$/, "") : "";
+  if (proxy && /^https?:\/\//i.test(proxy)) {
+    return `${proxy}?url=${encodeURIComponent(targetUrl)}`;
+  }
+  return targetUrl;
+}
+
 /**
  * Discovers the exact seasons and episodes for an anime from AnimeSalt mirrors.
  * @param {string} query - Anime name or slug (e.g. "Solo Leveling" or "solo-leveling")
@@ -52,25 +60,27 @@ async function discoverAnimeSeries(query) {
 
   for (const host of MIRRORS) {
     try {
-      let res = await fetch(`https://${host}/series/${targetSlug}/`, {
+      const seriesUrl = `https://${host}/series/${targetSlug}/`;
+      let res = await fetch(getFetchUrl(seriesUrl), {
         headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
-        signal: AbortSignal.timeout(3000)
+        signal: AbortSignal.timeout(4000)
       });
 
       // If direct slug 404s, try search query
       if (res.status === 404) {
-        const searchRes = await fetch(`https://${host}/?s=${encodeURIComponent(query)}`, {
+        const searchUrl = `https://${host}/?s=${encodeURIComponent(query)}`;
+        const searchRes = await fetch(getFetchUrl(searchUrl), {
           headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
-          signal: AbortSignal.timeout(3000)
+          signal: AbortSignal.timeout(4000)
         });
         if (searchRes.ok) {
           const sHtml = await searchRes.text();
           const match = sHtml.match(/\/series\/([a-z0-9-]+)\/?/i);
           if (match && match[1]) {
             targetSlug = match[1];
-            res = await fetch(`https://${host}/series/${targetSlug}/`, {
+            res = await fetch(getFetchUrl(`https://${host}/series/${targetSlug}/`), {
               headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
-              signal: AbortSignal.timeout(3000)
+              signal: AbortSignal.timeout(4000)
             });
           }
         }

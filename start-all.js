@@ -74,8 +74,27 @@ activeWorkers.push(uploaderWorker);
 
 console.log(`✅ Started ${allCustomerTokens.length} Customer Bots + 1 Storage Uploader Bot`);
 
+// 4. Render 24/7 Web Service Health Listener
+const http = require("node:http");
+const PORT = Number(process.env.PORT) || 8080;
+const healthServer = http.createServer((req, res) => {
+  res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+  res.end(JSON.stringify({
+    status: "ok",
+    system: "RYVAN Anime Multi-Bot",
+    uptimeSeconds: Math.floor(process.uptime()),
+    activeCustomerBots: allCustomerTokens.length,
+    timestamp: new Date().toISOString()
+  }));
+});
+
+healthServer.listen(PORT, "0.0.0.0", () => {
+  console.log(`🌐 Web Service Health Server active on port ${PORT} (Render 24/7 ready)`);
+});
+
 function handleExit() {
   console.log("\n🛑 Stopping all RYVAN bot workers...");
+  try { healthServer.close(); } catch {}
   for (const w of activeWorkers) {
     try { w.kill(); } catch {}
   }
