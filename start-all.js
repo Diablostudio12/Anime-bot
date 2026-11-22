@@ -51,12 +51,13 @@ function startWorker(name, scriptName, args = [], colorCode = "\x1b[36m") {
 
 // 1. Gather all customer bot tokens
 const primaryToken = process.env.TELEGRAM_BOT_TOKEN;
+const pdiToken = process.env.PDI_BOT_TOKEN;
 const extraTokens = (process.env.EXTRA_BOT_TOKENS || "")
   .split(",")
   .map(t => t.trim())
   .filter(Boolean);
 
-const allCustomerTokens = [primaryToken, ...extraTokens].filter(Boolean);
+const allCustomerTokens = [...new Set([primaryToken, pdiToken, ...extraTokens].filter(Boolean))];
 const activeWorkers = [];
 
 // 2. Launch customer bots
