@@ -4,6 +4,7 @@ require("dotenv").config();
 const fs = require("node:fs");
 const path = require("node:path");
 const { Bot, InputFile } = require("grammy");
+const { run } = require("@grammyjs/runner");
 const { autoRetry } = require("@grammyjs/auto-retry");
 const { registerVideo, makeEpisodeKey } = require("./video-vault");
 
@@ -172,12 +173,29 @@ bot.on("message:video", async (ctx) => {
   );
 });
 
-bot.catch(err => console.error("Uploader Bot Error:", err));
+bot.catch(err => console.error("Uploader Bot Error:", err.message || err));
 
-console.log("🚀 Starting RYVAN Storage Uploader Bot...");
-bot.start({
-  onStart: (info) => {
-    console.log(`✅ Uploader Bot active as @${info.username}`);
-    console.log(`Storage Channel configured: ${storageChannelId || "Not set yet"}`);
+async function startUploader() {
+  console.log("🚀 Initializing RYVAN Storage Uploader Bot...");
+  const existing = await bot.api.getWebhookInfo().catch(() => ({ url: "" }));
+  if (existing.url) {
+    console.log("Clearing old webhook for Uploader Bot...");
+    await bot.api.deleteWebhook({ drop_pending_updates: false }).catch(() => {});
   }
+  const info = await bot.api.getMe();
+  console.log(`✅ Uploader Bot active as @${info.username} (ID: ${info.id})`);
+  console.log(`Storage Channel configured: ${storageChannelId || "Not set yet"}`);
+
+  run(bot, {
+    runner: {
+      fetch: {
+        allowed_updates: ["message", "channel_post", "edited_channel_post", "my_chat_member"]
+      }
+    }
+  });
+}
+
+startUploader().catch(err => {
+  console.error("Uploader Bot fatal startup error:", err);
+  process.exit(1);
 });
