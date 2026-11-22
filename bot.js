@@ -1559,8 +1559,11 @@ try {
 }
 
 // Pure Native Anime Engine (0 AI tokens used)
-bot.on("callback_query:data", async (ctx) => {
+bot.on("callback_query:data", async (ctx, next) => {
   const data = ctx.callbackQuery.data || "";
+  if (data.startsWith("vip:")) {
+    return next();
+  }
   await ctx.answerCallbackQuery().catch(() => {});
 
   if (data.startsWith("season:")) {
@@ -1728,6 +1731,39 @@ bot.on("message:text", async (ctx) => {
     speculativePrefetch(directSlug, season, [episode + 1, episode + 2]);
 
     await handleEpisode(ctx);
+    return;
+  }
+
+  // 1.8 UTR / Payment Reference Detection (12 Digits)
+  const utrMatch = cleanedMessage.match(/\b(\d{12})\b/);
+  if (utrMatch) {
+    const utr = utrMatch[1];
+    const user = ctx.from;
+    const name = [user.first_name, user.last_name].filter(Boolean).join(" ") || "User";
+    const username = user.username ? `@${user.username}` : "No username";
+
+    await ctx.reply(
+      `✅ *UTR Received:* \`${utr}\`\n\n` +
+      `Aapka transaction reference admin ke paas verification ke liye submit ho gaya hai. Admin approve karte hi aapka **6-Month VIP Pass** instant activate ho jayega! 🚀`,
+      { parse_mode: "Markdown" }
+    );
+
+    const adminText =
+      `🔔 *New VIP Payment Submission (UTR Detected)!*\n\n` +
+      `👤 *User:* ${name} (${username})\n` +
+      `🆔 *User ID:* \`${userId}\`\n` +
+      `🔢 *UTR / Ref:* \`${utr}\`\n` +
+      `💬 *Full Message:* ${message}\n` +
+      `📅 *Date:* ${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}`;
+
+    const keyboard = new InlineKeyboard()
+      .text("✅ Approve VIP (180 Days)", `vip:appr:${userId}:180`).row()
+      .text("❌ Reject Payment", `vip:rejc:${userId}`);
+
+    await bot.api.sendMessage(ownerId, adminText, {
+      parse_mode: "Markdown",
+      reply_markup: keyboard
+    }).catch(err => console.warn("Could not notify owner of UTR:", err.message));
     return;
   }
 

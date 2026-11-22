@@ -1,5 +1,6 @@
 "use strict";
 
+const { InlineKeyboard } = require("grammy");
 const { upgradeToVip, revokeVip, formatStatus, isUserVip } = require("./subscription-manager");
 
 function registerVipPayment(bot, ownerId, state, saveState) {
@@ -32,7 +33,7 @@ function registerVipPayment(bot, ownerId, state, saveState) {
       `1. UPI ID: \`${upiVpa}\`\n` +
       `2. Amount: *₹${vipPrice}*\n` +
       `3. Note/Remark me apna Telegram User ID zaroor daalein: \`${userId}\`\n\n` +
-      `Payment karne ke baad, screenshot aur transaction UTR ID yahan bot me bhejein ya admin ko forward karein. Verification ke turant baad aapka VIP account active ho jayega! 🚀`;
+      `Payment karne ke baad, **screenshot ya 12-digit UTR ID** yahan bot me bhejein. Admin verification ke baad aapka VIP account instant active ho jayega! 🚀`;
 
     try {
       await ctx.replyWithPhoto(qrUrl, {
@@ -53,7 +54,139 @@ function registerVipPayment(bot, ownerId, state, saveState) {
     return ctx.reply(formatStatus(state, ctx.from?.id), { parse_mode: "Markdown" });
   });
 
-  // Admin-only approval: /approve <userId> [days] [reference]
+  // Handle incoming payment screenshot from users
+  bot.on(["message:photo", "message:document"], async (ctx, next) => {
+    const userId = String(ctx.from?.id);
+    const user = ctx.from;
+    const name = [user.first_name, user.last_name].filter(Boolean).join(" ") || "User";
+    const username = user.username ? `@${user.username}` : "No username";
+    const caption = ctx.message.caption || "";
+
+    // If owner is sending a command like /link, let next middleware handle it
+    if (isOwner(ctx) && caption.startsWith("/")) {
+      return next();
+    }
+
+    // 1. Reply to user immediately
+    await ctx.reply(
+      `✅ *Payment Proof Received!*\n\n` +
+      `Aapka payment screenshot aur details admin ke paas verification ke liye submit ho gaye hain.\n` +
+      `Admin jaise hi approve karenge, aapka **6-Month VIP Pass (180 Days)** turant activate ho jayega! 🚀`,
+      { parse_mode: "Markdown" }
+    ).catch(() => {});
+
+    // 2. Forward/Send to Owner with 1-Click Interactive Approve Buttons
+    const adminText =
+      `🔔 *New VIP Payment Submission!*\n\n` +
+      `👤 *User:* ${name} (${username})\n` +
+      `🆔 *User ID:* \`${userId}\`\n` +
+      `💰 *Plan:* 6 Months VIP (₹${vipPrice})\n` +
+      `📝 *User Note/UTR:* ${caption || "None"}\n` +
+      `📅 *Date:* ${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}`;
+
+    const keyboard = new InlineKeyboard()
+      .text("✅ Approve VIP (180 Days)", `vip:appr:${userId}:180`).row()
+      .text("❌ Reject Payment", `vip:rejc:${userId}`);
+
+    try {
+      if (ctx.message.photo && ctx.message.photo.length > 0) {
+        const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+        await bot.api.sendPhoto(ownerId, fileId, {
+          caption: adminText,
+          parse_mode: "Markdown",
+          reply_markup: keyboard
+        });
+      } else if (ctx.message.document) {
+        await bot.api.sendDocument(ownerId, ctx.message.document.file_id, {
+          caption: adminText,
+          parse_mode: "Markdown",
+          reply_markup: keyboard
+        });
+      } else {
+        await bot.api.sendMessage(ownerId, adminText, {
+          parse_mode: "Markdown",
+          reply_markup: keyboard
+        });
+      }
+    } catch (err) {
+      console.warn("Could not forward payment proof to owner:", err.message);
+    }
+  });
+
+  // Handle 1-Click Approval / Rejection from Admin
+  bot.callbackQuery(/^vip:(appr|rejc):/, async ctx => {
+    if (!isOwner(ctx)) {
+      return ctx.answerCallbackQuery({ text: "⛔ Sirf bot admin hi approve kar sakte hain.", show_alert: true });
+    }
+
+    const data = ctx.callbackQuery.data || "";
+    const [, action, targetUserId, daysText] = data.split(":");
+    const durationDays = Number(daysText) || 180;
+
+    await ctx.answerCallbackQuery().catch(() => {});
+
+    if (action === "appr") {
+      const updated = upgradeToVip(state, targetUserId, durationDays, "1-CLICK-UPI-APPROVAL");
+      saveState();
+
+      const successCaption =
+        `✅ *VIP APPROVED SUCCESSFULLY!*\n\n` +
+        `👤 User ID: \`${targetUserId}\`\n` +
+        `📅 Validity: ${durationDays} Days (Expires: ${updated.vipExpiry.slice(0, 10)})\n` +
+        `⚡ VIP access is now live for this user.`;
+
+      // Update admin message
+      try {
+        if (ctx.callbackQuery.message?.photo || ctx.callbackQuery.message?.document) {
+          await ctx.editMessageCaption({ caption: successCaption, parse_mode: "Markdown" });
+        } else {
+          await ctx.editMessageText(successCaption, { parse_mode: "Markdown" });
+        }
+      } catch {}
+
+      // Notify User in their Telegram DM
+      try {
+        await bot.api.sendMessage(
+          targetUserId,
+          `🎉 *Badhaai ho! Aapka RYVAN 6-Month VIP Pass activate ho gaya hai!*\n\n` +
+          `📅 *Expiry Date:* ${updated.vipExpiry.slice(0, 10)} (180 Days)\n` +
+          `⚡ Ab aap bina kisi 16-hour cooldown ke saare anime episodes direct HD me dekh sakte hain!\n\n` +
+          `Abhi anime search karein: \`Solo Leveling S1E1\``,
+          { parse_mode: "Markdown" }
+        );
+      } catch (e) {
+        console.warn(`Could not notify user ${targetUserId} in DM:`, e.message);
+      }
+    } else if (action === "rejc") {
+      const rejectCaption =
+        `❌ *VIP PAYMENT REJECTED*\n\n` +
+        `👤 User ID: \`${targetUserId}\`\n` +
+        `Status: Declined by Admin.`;
+
+      try {
+        if (ctx.callbackQuery.message?.photo || ctx.callbackQuery.message?.document) {
+          await ctx.editMessageCaption({ caption: rejectCaption, parse_mode: "Markdown" });
+        } else {
+          await ctx.editMessageText(rejectCaption, { parse_mode: "Markdown" });
+        }
+      } catch {}
+
+      // Notify User in DM
+      try {
+        await bot.api.sendMessage(
+          targetUserId,
+          `❌ *Payment Verification Failed*\n\n` +
+          `Aapka payment screenshot/UTR verify nahi ho saka.\n` +
+          `Kripya check karein ki sahi amount (₹${vipPrice}) sahi UPI ID par transfer hua hai ya admin se contact karein.`,
+          { parse_mode: "Markdown" }
+        );
+      } catch (e) {
+        console.warn(`Could not notify user ${targetUserId} of rejection:`, e.message);
+      }
+    }
+  });
+
+  // Admin-only approval command fallback: /approve <userId> [days] [reference]
   bot.command("approve", async ctx => {
     if (!isOwner(ctx)) return ctx.reply("⛔ This admin command is restricted to the bot owner.");
     const parts = (ctx.match || "").trim().split(/\s+/);
