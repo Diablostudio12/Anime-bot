@@ -186,11 +186,19 @@ async function startUploader() {
   console.log(`✅ Uploader Bot active as @${info.username} (ID: ${info.id})`);
   console.log(`Storage Channel configured: ${storageChannelId || "Not set yet"}`);
 
-  run(bot, {
+  const runnerInstance = run(bot, {
     runner: {
       fetch: {
         allowed_updates: ["message", "channel_post", "edited_channel_post", "my_chat_member"]
       }
+    }
+  });
+
+  runnerInstance.task().catch((err) => {
+    if (err?.error_code === 409 || String(err).includes("409")) {
+      console.warn("⚠️ [UploaderBot] 409 Conflict: another instance is active. Standing by...");
+    } else {
+      console.error("Uploader Bot Runner Error:", err);
     }
   });
 }
