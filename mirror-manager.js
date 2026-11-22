@@ -130,9 +130,18 @@ function isAbyssUrl(url) {
   return /abyssplayer\.com|abyss\.to|abysscdn/i.test(url);
 }
 
+function getProxyFetchUrl(targetUrl) {
+  const proxy = process.env.CF_PROXY_URL ? process.env.CF_PROXY_URL.trim().replace(/\/$/, "") : "";
+  if (proxy && /^https?:\/\//i.test(proxy)) {
+    return `${proxy}?url=${encodeURIComponent(targetUrl)}`;
+  }
+  return targetUrl;
+}
+
 // 4. Ultra-Fast Zero-Copy Undici Fetcher
-async function fastFetchText(url, headers = {}, timeoutMs = 3500) {
-  const res = await request(url, {
+async function fastFetchText(url, headers = {}, timeoutMs = 4000) {
+  const target = getProxyFetchUrl(url);
+  const res = await request(target, {
     method: "GET",
     headers: {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
