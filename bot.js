@@ -422,11 +422,12 @@ async function getEpisodeAbyssLinks(episodeUrl) {
 
   return [];
 }
-const uploaderBotToken = process.env.UPLOADER_BOT_TOKEN;
+const uploaderBotToken = process.env.UPLOADER_BOT_TOKEN || "9023064138:AAFWVPla12saugdr5MsewpLp77dxGVffQP0";
 const vaultStorageChannelId = String(process.env.STORAGE_CHANNEL_ID || "-1004364518808").trim();
 
 async function postEpisodeRequestToVault({ anime, season, episode, requestedLang, links, episodeUrl, userId, username }) {
-  if (!uploaderBotToken || !vaultStorageChannelId) return;
+  const tokenToUse = uploaderBotToken || process.env.TELEGRAM_BOT_TOKEN;
+  if (!tokenToUse || !vaultStorageChannelId) return;
 
   const linksFormatted = (links || [])
     .map(item => `• *${item.language}*: \`${item.playerUrl || item.link}\``)
@@ -444,22 +445,43 @@ async function postEpisodeRequestToVault({ anime, season, episode, requestedLang
     `💡 *To link full video to this episode, upload/forward the video here with caption:*\n` +
     `\`${anime} | ${season} | ${episode} | ${requestedLang}\``;
 
-  try {
-    const inlineKeyboard = new InlineKeyboard();
-    const firstLink = links && links[0] && (links[0].playerUrl || links[0].link);
-    if (firstLink && /^https?:\/\//i.test(firstLink)) {
-      inlineKeyboard.url("▶️ Open Player Link", firstLink);
-    }
+  const inlineKeyboard = new InlineKeyboard();
+  const firstLink = links && links[0] && (links[0].playerUrl || links[0].link);
+  if (firstLink && /^https?:\/\//i.test(firstLink)) {
+    inlineKeyboard.url("▶️ Open Player Link", firstLink);
+  }
 
-    const uploaderClient = new Bot(uploaderBotToken);
+  // 1. Try sending via Uploader Bot
+  try {
+    const uploaderClient = new Bot(tokenToUse);
     await uploaderClient.api.sendMessage(vaultStorageChannelId, text, {
       parse_mode: "Markdown",
       link_preview_options: { is_disabled: true },
       reply_markup: inlineKeyboard
     });
     console.log(`📤 [Vault Auto-Post] Sent ${anime} S${season}E${episode} to ${vaultStorageChannelId}`);
+    return;
   } catch (err) {
-    console.warn("⚠️ Vault Auto-Post Error:", err.message);
+    console.warn("⚠️ Vault Auto-Post via Uploader Bot error:", err.message);
+  }
+
+  // 2. Fallback: send via Customer Bot
+  try {
+    await bot.api.sendMessage(vaultStorageChannelId, text, {
+      parse_mode: "Markdown",
+      link_preview_options: { is_disabled: true },
+      reply_markup: inlineKeyboard
+    });
+    console.log(`📤 [Vault Auto-Post Fallback] Sent ${anime} S${season}E${episode} to ${vaultStorageChannelId}`);
+  } catch (err2) {
+    // 3. Fallback without Markdown
+    try {
+      await bot.api.sendMessage(vaultStorageChannelId, text.replace(/[*`_]/g, ""), {
+        reply_markup: inlineKeyboard
+      });
+    } catch (err3) {
+      console.error("❌ Vault Auto-Post completely failed:", err3.message);
+    }
   }
 }
 
