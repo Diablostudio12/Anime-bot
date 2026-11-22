@@ -422,6 +422,47 @@ async function getEpisodeAbyssLinks(episodeUrl) {
 
   return [];
 }
+const uploaderBotToken = process.env.UPLOADER_BOT_TOKEN;
+const vaultStorageChannelId = String(process.env.STORAGE_CHANNEL_ID || "-1004364518808").trim();
+
+async function postEpisodeRequestToVault({ anime, season, episode, requestedLang, links, episodeUrl, userId, username }) {
+  if (!uploaderBotToken || !vaultStorageChannelId) return;
+
+  const linksFormatted = (links || [])
+    .map(item => `• *${item.language}*: \`${item.playerUrl || item.link}\``)
+    .join("\n") || "No direct player link";
+
+  const userTag = username ? `@${username}` : `User ID: \`${userId}\``;
+  const text =
+    `📥 *New Episode Stream Request*\n\n` +
+    `🎬 *Anime:* *${anime}*\n` +
+    `📺 *Season:* ${season} • *Episode:* ${episode}\n` +
+    `🌐 *Audio:* ${requestedLang}\n` +
+    `👤 *Requested By:* ${userTag}\n\n` +
+    `🔗 *Extracted Abyss Streaming Links:*\n${linksFormatted}\n\n` +
+    `📄 *Source Page:* [Direct Episode Page](${episodeUrl})\n\n` +
+    `💡 *To link full video to this episode, upload/forward the video here with caption:*\n` +
+    `\`${anime} | ${season} | ${episode} | ${requestedLang}\``;
+
+  try {
+    const inlineKeyboard = new InlineKeyboard();
+    const firstLink = links && links[0] && (links[0].playerUrl || links[0].link);
+    if (firstLink && /^https?:\/\//i.test(firstLink)) {
+      inlineKeyboard.url("▶️ Open Player Link", firstLink);
+    }
+
+    const uploaderClient = new Bot(uploaderBotToken);
+    await uploaderClient.api.sendMessage(vaultStorageChannelId, text, {
+      parse_mode: "Markdown",
+      link_preview_options: { is_disabled: true },
+      reply_markup: inlineKeyboard
+    });
+    console.log(`📤 [Vault Auto-Post] Sent ${anime} S${season}E${episode} to ${vaultStorageChannelId}`);
+  } catch (err) {
+    console.warn("⚠️ Vault Auto-Post Error:", err.message);
+  }
+}
+
 async function handleEpisode(ctx) {
   const input = (
     typeof ctx.episodeInput === "string"
@@ -511,6 +552,18 @@ async function handleEpisode(ctx) {
     const hostMirror = String(mirrorResult.sourceMirror || "animesalt.cx").replace(/\s*\(.*?\)/, "").trim();
     const episodeUrl = `https://${hostMirror}/episode/${slug}-${season}x${episode}/`;
 
+    // Automatically post episode details and Abyss links to Ryvan Secret Vault channel
+    postEpisodeRequestToVault({
+      anime,
+      season,
+      episode,
+      requestedLang,
+      links: mirrorResult.links,
+      episodeUrl,
+      userId,
+      username: ctx.from?.username || ""
+    }).catch(() => {});
+
     const navKeyboard = new InlineKeyboard()
       .url("🌐 Watch Episode in Web Player", episodeUrl).row();
 
@@ -525,12 +578,12 @@ async function handleEpisode(ctx) {
     await ctx.reply(
       `🎬 *${anime}*\n` +
       `Season ${season} • Episode ${episode}\n\n` +
-      `📁 *Ryvan Secret Vault Status:*\n` +
-      `Yeh video abhi tak Secret Vault channel me upload nahi hui hai.\n\n` +
-      `🌐 *Web Player (No Redirect):*\n` +
+      `📁 *Ryvan Secret Vault Update:*\n` +
+      `Is episode ke Abyss links ko @RyvanStorageUploaderBot ne aapke [Ryvan Secret Vault Channel](https://t.me/+-bQqzM9y6rQ2Mzg1) me post kar diya hai!\n\n` +
+      `🌐 *Web Player (Watch Now):*\n` +
       `Aap neeche button par click karke direct episode dekh sakte hain (Available: ${languagesAvailable}).\n\n` +
       `💡 *Direct Video Kaise Milegi?*\n` +
-      `Jaise hi admin ya uploader is episode ko [Ryvan Secret Vault](https://t.me/+-bQqzM9y6rQ2Mzg1) me post karega, yeh bot direct full HD video file DM me bhejna shuru kar dega!` +
+      `Jaise hi is episode ki video file Vault channel me aayegi, yeh bot sabhi users ko direct full HD video file DM me bhej dega!` +
       cooldownNotice,
       {
         parse_mode: "Markdown",
