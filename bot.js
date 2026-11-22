@@ -1768,18 +1768,12 @@ bot.catch(console.error);
 async function startApp() {
   await hydrateRemote(); // Abort startup if configured storage is down; never overwrite remote with empty local state.
   markInterruptedOnStartup();
-  // Explicit BOT_MODE wins; otherwise Render uses webhook, a Windows/local process uses polling.
-  // TELEGRAM_WEBHOOK_SECRET by itself must never force webhook mode locally.
-  const configuredMode = (process.env.BOT_MODE || "auto").trim().toLowerCase();
-  if (!["auto", "local", "webhook"].includes(configuredMode)) throw new Error("BOT_MODE must be auto, local, or webhook");
-  const mode = configuredMode === "auto" ? (process.env.RENDER_EXTERNAL_URL ? "webhook" : "local") : configuredMode;
-  if (mode === "local" && process.env.RENDER_EXTERNAL_URL) throw new Error("Local polling is disabled inside Render. Set BOT_MODE=webhook.");
-  const publicUrl = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || "").replace(/\/$/, "");
-  if (mode === "webhook") {
+  const configuredMode = (process.env.BOT_MODE || "local").trim().toLowerCase();
+  const mode = (configuredMode === "webhook" && process.env.TELEGRAM_WEBHOOK_SECRET) ? "webhook" : "local";
+  const publicUrl = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
+  if (mode === "webhook" && publicUrl) {
     const http = require("node:http");
     const secret = process.env.TELEGRAM_WEBHOOK_SECRET || "";
-    if (!/^[A-Za-z0-9_-]{24,256}$/.test(secret)) throw new Error("Set TELEGRAM_WEBHOOK_SECRET (24+ letters/digits/_/-)");
-    if (!/^https:\/\/[^/]+$/.test(publicUrl)) throw new Error("Set PUBLIC_URL to your https://name.onrender.com");
     await bot.init();
     const webhookPath = "/telegram/webhook";
     const server = http.createServer((req, res) => {
@@ -1801,7 +1795,6 @@ async function startApp() {
         try { update = JSON.parse(body); }
         catch { res.writeHead(400); res.end(); return; }
         res.writeHead(200); res.end("OK");
-        // Respond promptly: long-running commands must not block Telegram webhook delivery.
         void bot.handleUpdate(update).catch(err => console.error("Webhook handling:", err));
       });
     });
@@ -1810,15 +1803,14 @@ async function startApp() {
     activeMode = "webhook";
     console.log("Webhook ready at", publicUrl + webhookPath);
   } else {
-    // Telegram allows only one update delivery mode at a time. Suspend Render first.
-    // Delete an old webhook without dropping queued updates before long polling starts.
-    const existing = await bot.api.getWebhookInfo();
+    // Delete any stale webhook without dropping queued updates before long polling starts
+    const existing = await bot.api.getWebhookInfo().catch(() => ({ url: "" }));
     if (existing.url) {
-      console.log("Switching Telegram from webhook to local polling. Ensure Render is suspended.");
-      await bot.api.deleteWebhook({ drop_pending_updates: false });
+      console.log("Clearing old webhook before long polling starts...");
+      await bot.api.deleteWebhook({ drop_pending_updates: false }).catch(() => {});
     }
     activeMode = "polling";
-    console.log("RYVAN local polling ready with @grammyjs/runner (high concurrency). Keep Render suspended while this runs.");
+    console.log(`🚀 High-concurrency polling active with @grammyjs/runner`);
     runner = run(bot, {
       runner: {
         fetch: {
