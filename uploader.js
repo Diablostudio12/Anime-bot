@@ -9,7 +9,8 @@ const { autoRetry } = require("@grammyjs/auto-retry");
 const { registerVideo, makeEpisodeKey } = require("./video-vault");
 
 const uploaderToken = process.env.UPLOADER_BOT_TOKEN;
-const ownerId = process.env.TELEGRAM_OWNER_ID;
+const ownerId = String(process.env.TELEGRAM_OWNER_ID || "8518864775").trim();
+let storageChannelId = String(process.env.STORAGE_CHANNEL_ID || "-1004364518808").trim();
 
 if (!uploaderToken) {
   console.error("❌ UPLOADER_BOT_TOKEN is missing in .env!");
@@ -42,8 +43,6 @@ function saveState(state) {
   try { fs.renameSync(temp, STATE_FILE); }
   catch (e) { try { fs.unlinkSync(temp); } catch {} throw e; }
 }
-
-let storageChannelId = process.env.STORAGE_CHANNEL_ID || "";
 
 // Auto-detect storage channel ID from channel posts or member updates
 bot.on(["channel_post", "edited_channel_post", "my_chat_member"], async (ctx, next) => {
@@ -109,18 +108,21 @@ bot.on("channel_post:video", async (ctx) => {
 
 // Command: /start
 bot.command("start", async (ctx) => {
-  if (String(ctx.from?.id) !== String(ownerId)) {
-    return ctx.reply("🤖 RYVAN Storage Uploader Bot. Internal worker only.");
-  }
-  await ctx.reply(
-    `🤖 *RYVAN Storage Uploader Bot Online*\n\n` +
-    `📁 Storage Channel ID: \`${storageChannelId || "Not detected yet (send a message in channel)"}\`\n\n` +
+  const isOwner = String(ctx.from?.id) === ownerId;
+  const statusNote = isOwner ? "👑 Admin Access" : "👤 Guest Worker";
+  const text =
+    `🤖 *RYVAN Storage Uploader Bot Online* (${statusNote})\n\n` +
+    `📁 Storage Channel ID: \`${storageChannelId || "-1004364518808"}\`\n\n` +
     `Commands:\n` +
     `• \`/status\` — Check uploader & storage status\n` +
     `• \`/link <anime> | <season> | <ep> | <lang> | <file_id>\` — Manually catalog video\n` +
-    `• Send/Forward any video file to this bot to get its Telegram file_id`,
-    { parse_mode: "Markdown" }
-  );
+    `• Send or Forward any video file to get its Telegram file_id`;
+
+  try {
+    await ctx.reply(text, { parse_mode: "Markdown" });
+  } catch {
+    await ctx.reply(text.replace(/[*`_]/g, ""));
+  }
 });
 
 // Command: /status
