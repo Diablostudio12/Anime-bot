@@ -75,10 +75,117 @@ activeWorkers.push(uploaderWorker);
 
 console.log(`✅ Started ${allCustomerTokens.length} Customer Bots + 1 Storage Uploader Bot`);
 
-// 4. Render 24/7 Web Service Health Listener
+// 4. Render 24/7 Web Service Health Listener + Telegram In-App Iframe Player
 const http = require("node:http");
 const PORT = Number(process.env.PORT) || 8080;
 const healthServer = http.createServer((req, res) => {
+  const parsedUrl = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+
+  // Route: /player or /watch — Embedded Iframe Video Player for Telegram WebApp
+  if (parsedUrl.pathname === "/player" || parsedUrl.pathname === "/watch") {
+    const src = parsedUrl.searchParams.get("src") || "";
+    const title = parsedUrl.searchParams.get("title") || "Ryvan Anime Stream";
+
+    if (!src || !/^https?:\/\//i.test(src)) {
+      res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+      return res.end("Missing or invalid video source URL.");
+    }
+
+    const safeSrc = src.replace(/"/g, "&quot;");
+    const safeTitle = title.replace(/[<>"'&]/g, "");
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>${safeTitle}</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: #000;
+      color: #fff;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .container {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+    .header {
+      background: #0f0f13;
+      padding: 10px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #1f1f2e;
+      flex-shrink: 0;
+    }
+    .header-badge {
+      background: #22c55e;
+      color: #000;
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: bold;
+    }
+    .player-wrapper {
+      flex: 1;
+      width: 100%;
+      height: 100%;
+      position: relative;
+      background: #000;
+    }
+    iframe {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <span>🎬 ${safeTitle}</span>
+      <span class="header-badge">HD STREAM</span>
+    </div>
+    <div class="player-wrapper">
+      <iframe
+        src="${safeSrc}"
+        allowfullscreen="true"
+        webkitallowfullscreen="true"
+        mozallowfullscreen="true"
+        allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+        referrerpolicy="no-referrer">
+      </iframe>
+    </div>
+  </div>
+  <script>
+    try {
+      if (window.Telegram && window.Telegram.WebApp) {
+        window.Telegram.WebApp.ready();
+        window.Telegram.WebApp.expand();
+      }
+    } catch (e) {}
+  </script>
+</body>
+</html>`;
+
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=300" });
+    return res.end(html);
+  }
+
+  // Default Route: Health Check
   res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
   res.end(JSON.stringify({
     status: "ok",

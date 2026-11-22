@@ -447,7 +447,15 @@ async function postEpisodeRequestToVault({ anime, season, episode, requestedLang
 
   const inlineKeyboard = new InlineKeyboard();
   const firstLink = links && links[0] && (links[0].playerUrl || links[0].link);
-  if (firstLink && /^https?:\/\//i.test(firstLink)) {
+  const renderBaseUrl = (process.env.RENDER_EXTERNAL_URL || "").replace(/\/+$/, "");
+  let playerUrl = firstLink;
+  if (renderBaseUrl && firstLink) {
+    playerUrl = `${renderBaseUrl}/player?src=${encodeURIComponent(firstLink)}&title=${encodeURIComponent(`${anime} S${season}E${episode}`)}`;
+  }
+
+  if (playerUrl && /^https?:\/\//i.test(playerUrl)) {
+    inlineKeyboard.url("▶️ Open Clean Player", playerUrl);
+  } else if (firstLink && /^https?:\/\//i.test(firstLink)) {
     inlineKeyboard.url("▶️ Open Player Link", firstLink);
   }
 
@@ -586,8 +594,23 @@ async function handleEpisode(ctx) {
       username: ctx.from?.username || ""
     }).catch(() => {});
 
-    const navKeyboard = new InlineKeyboard()
-      .url("🌐 Watch Episode in Web Player", episodeUrl).row();
+    const firstLink = mirrorResult.links && mirrorResult.links[0] && (mirrorResult.links[0].playerUrl || mirrorResult.links[0].link);
+    const renderBaseUrl = (process.env.RENDER_EXTERNAL_URL || "").replace(/\/+$/, "");
+    let webAppPlayerUrl = "";
+    if (renderBaseUrl && firstLink) {
+      webAppPlayerUrl = `${renderBaseUrl}/player?src=${encodeURIComponent(firstLink)}&title=${encodeURIComponent(`${anime} S${season}E${episode}`)}`;
+    }
+
+    const navKeyboard = new InlineKeyboard();
+    if (webAppPlayerUrl && webAppPlayerUrl.startsWith("https://")) {
+      navKeyboard.webApp("▶️ Play Episode (Inside Telegram)", webAppPlayerUrl).row();
+      navKeyboard.url("🌐 Watch on Website", episodeUrl).row();
+    } else if (firstLink && firstLink.startsWith("https://")) {
+      navKeyboard.url("▶️ Watch Stream", firstLink).row();
+      navKeyboard.url("🌐 Watch on Website", episodeUrl).row();
+    } else {
+      navKeyboard.url("🌐 Watch Episode in Web Player", episodeUrl).row();
+    }
 
     if (episode > 1) {
       navKeyboard.text(`◀️ Ep ${episode - 1}`, `play:${slug}:${season}:${episode - 1}`);
