@@ -1007,8 +1007,17 @@ async function hydrateRemote() {
 function saveState() {
   const temp = `${STATE_FILE}.${process.pid}.tmp`;
   fs.writeFileSync(temp, JSON.stringify(state, null, 2), { encoding: "utf8", mode: 0o600 });
-  try { fs.renameSync(temp, STATE_FILE); }
-  catch (error) { try { fs.unlinkSync(temp); } catch {} throw error; }
+  try {
+    fs.renameSync(temp, STATE_FILE);
+  } catch (error) {
+    try {
+      fs.copyFileSync(temp, STATE_FILE);
+      fs.unlinkSync(temp);
+    } catch {
+      try { fs.unlinkSync(temp); } catch {}
+      console.warn("⚠️ Local state write contention (handled):", error.message);
+    }
+  }
   remoteSave(JSON.stringify(state));
 }
 function markInterruptedOnStartup() {
