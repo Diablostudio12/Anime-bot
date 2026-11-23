@@ -4,7 +4,8 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "start": "node bot.js",
+    "start": "node start-all.js",
+    "bot": "node bot.js",
     "uploader": "node uploader.js",
     "start:all": "node start-all.js",
     "check": "node --check bot.js && node --check uploader.js && node --check start-all.js",

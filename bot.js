@@ -1936,6 +1936,22 @@ async function startApp() {
     }
     activeMode = "polling";
     console.log(`🚀 High-concurrency polling active with @grammyjs/runner`);
+
+    if (process.env.PORT) {
+      try {
+        const http = require("node:http");
+        const portNum = Number(process.env.PORT || 10000);
+        const dummyServer = http.createServer((req, res) => {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ status: "ok", mode: "polling", bot: "RyvanAnimeBot" }));
+        });
+        dummyServer.on("error", () => {}); // ignore EADDRINUSE if start-all.js already bound it
+        dummyServer.listen(portNum, "0.0.0.0", () => {
+          console.log(`🌐 Port listener active on ${portNum} for Render health check`);
+        });
+      } catch {}
+    }
+
     runner = run(bot, {
       runner: {
         fetch: {
