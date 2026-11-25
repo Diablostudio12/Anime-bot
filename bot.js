@@ -14,7 +14,8 @@ const ALLOWED_ANIME_DOMAINS = [
   "animesalt.cx", "www.animesalt.cx",
   "animesalttv.to", "www.animesalttv.to",
   "animesalt.at", "www.animesalt.at",
-  "animesalt.me", "www.animesalt.me"
+  "animesalt.me", "www.animesalt.me",
+  "animecenter.pages.dev"
 ];
 function isAllowedAnimeHost(hostname) {
   return ALLOWED_ANIME_DOMAINS.includes(String(hostname || "").toLowerCase());
