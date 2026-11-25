@@ -9,14 +9,12 @@ const { registerVipPayment } = require("./vip-payment");
 const { registerForceSubscribe } = require("./force-subscribe");
 const { fetchEpisodeAbyssFromAllMirrors, speculativePrefetch, isAbyssUrl, MIRROR_DOMAINS } = require("./mirror-manager");
 const { discoverAnimeSeries } = require("./anime-discovery");
-const { extractAnimeCenter } = require("./animecenter-parser");
 
 const ALLOWED_ANIME_DOMAINS = [
   "animesalt.cx", "www.animesalt.cx",
   "animesalttv.to", "www.animesalttv.to",
   "animesalt.at", "www.animesalt.at",
-  "animesalt.me", "www.animesalt.me",
-  "animecenter.pages.dev"
+  "animesalt.me", "www.animesalt.me"
 ];
 function isAllowedAnimeHost(hostname) {
   return ALLOWED_ANIME_DOMAINS.includes(String(hostname || "").toLowerCase());
@@ -393,12 +391,6 @@ async function fetchWithRetry(url, options = {}) {
   });
 }
 async function getEpisodeAbyssLinks(episodeUrl) {
-  try {
-    const sourceUrl = new URL(episodeUrl);
-    if (sourceUrl.hostname.toLowerCase() === "animecenter.pages.dev") {
-      return await extractAnimeCenter(sourceUrl.href);
-    }
-  } catch {}
   let slug = "";
   let season = 1;
   let episode = 1;
@@ -658,8 +650,7 @@ async function discoverSeasonEpisodes(slug, season, knownEpisodes) {
   const candidateMirrors = [
     "https://animesalt.cx",
     "https://animesalttv.to",
-    "https://animesalt.at",
-    "https://animecenter.pages.dev"
+    "https://animesalt.at"
   ];
 
   let activeMirror = "https://animesalt.cx";
@@ -840,10 +831,7 @@ bot.command("bulk", async (ctx) => {
   const slug = anime.toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
-  const discoveredSeries = await discoverAnimeSeries(anime);
-  const discoveredSlug = discoveredSeries.found ? discoveredSeries.slug : slug;
-  const seriesHost = discoveredSeries.found ? discoveredSeries.mirror : "animesalt.cx";
-  const seriesUrl = `https://${seriesHost}/series/${discoveredSlug}/`;
+  const seriesUrl = `https://animesalt.cx/series/${slug}/`;
   bulkBusy = true;
   try {
     await ctx.reply("🔍 Scanning season episode listing...");
@@ -862,9 +850,9 @@ bot.command("bulk", async (ctx) => {
     $("a[href]").each((_, el) => {
       try {
         const url = new URL($(el).attr("href"), seriesUrl);
-        if (url.hostname !== seriesHost) return;
+        if (url.hostname !== "animesalt.cx") return;
         const pattern = new RegExp(
-          `^/episode/${discoveredSlug}-${season}x(\\d+)/?$`
+          `^/episode/${slug}-${season}x(\\d+)/?$`
         );
         const match = url.pathname.match(pattern);
         if (match) {
@@ -873,7 +861,7 @@ bot.command("bulk", async (ctx) => {
       } catch { }
     });
     const sorted = await discoverSeasonEpisodes(
-      discoveredSlug,
+      slug,
       season,
       episodes
     );
@@ -1442,19 +1430,6 @@ bot.command("abyss", async (ctx) => {
         "• /abyss <Episode URL>\n\n" +
         "Example: /abyss Solo Leveling | 1 | 1"
       );
-    }
-
-    if (!input.includes("|")) {
-      try {
-        const directUrl = new URL(input);
-        if (directUrl.hostname.toLowerCase() === "animecenter.pages.dev") {
-          const links = await extractAnimeCenter(directUrl.href);
-          const message = links.map(item => `• *${item.language}*: `${item.playerUrl}``).join("\n\n");
-          return ctx.reply(`🎬 *AnimeCenter Player Links*\n\n${message}`, { parse_mode: "Markdown", link_preview_options: { is_disabled: true } });
-        }
-      } catch (error) {
-        if (/AnimeCenter|episode path/i.test(String(error.message))) return ctx.reply(`❌ ${error.message}`);
-      }
     }
 
     let slug = "";
