@@ -9,6 +9,7 @@ const { registerVipPayment } = require("./vip-payment");
 const { registerForceSubscribe } = require("./force-subscribe");
 const { fetchEpisodeAbyssFromAllMirrors, speculativePrefetch, isAbyssUrl, MIRROR_DOMAINS } = require("./mirror-manager");
 const { discoverAnimeSeries } = require("./anime-discovery");
+const { extractAnimeCenter } = require("./animecenter-parser");
 
 const ALLOWED_ANIME_DOMAINS = [
   "animesalt.cx", "www.animesalt.cx",
@@ -392,6 +393,12 @@ async function fetchWithRetry(url, options = {}) {
   });
 }
 async function getEpisodeAbyssLinks(episodeUrl) {
+  try {
+    const sourceUrl = new URL(episodeUrl);
+    if (sourceUrl.hostname.toLowerCase() === "animecenter.pages.dev") {
+      return await extractAnimeCenter(sourceUrl.href);
+    }
+  } catch {}
   let slug = "";
   let season = 1;
   let episode = 1;
@@ -651,7 +658,8 @@ async function discoverSeasonEpisodes(slug, season, knownEpisodes) {
   const candidateMirrors = [
     "https://animesalt.cx",
     "https://animesalttv.to",
-    "https://animesalt.at"
+    "https://animesalt.at",
+    "https://animecenter.pages.dev"
   ];
 
   let activeMirror = "https://animesalt.cx";
@@ -832,7 +840,10 @@ bot.command("bulk", async (ctx) => {
   const slug = anime.toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
-  const seriesUrl = `https://animesalt.cx/series/${slug}/`;
+  const discoveredSeries = await discoverAnimeSeries(anime);
+  const discoveredSlug = discoveredSeries.found ? discoveredSeries.slug : slug;
+  const seriesHost = discoveredSeries.found ? discoveredSeries.mirror : "animesalt.cx";
+  const seriesUrl = `https://${seriesHost}/series/${discoveredSlug}/`;
   bulkBusy = true;
   try {
     await ctx.reply("🔍 Scanning season episode listing...");
@@ -851,9 +862,875 @@ bot.command("bulk", async (ctx) => {
     $("a[href]").each((_, el) => {
       try {
         const url = new URL($(el).attr("href"), seriesUrl);
-        if (url.hostname !== "animesalt.cx") return;
+        if (url.hostname !== seriesHost) return;
         const pattern = new RegExp(
-          `^/episode/${slug}-${season}x(\\d+)/?$`
+          `^/episode/${discoveredSlug}-${season}x(\\d+)/?require("dotenv").config();
+const crypto = require("node:crypto");
+const { InputFile, Bot, InlineKeyboard } = require("grammy");
+const { run, sequentialize } = require("@grammyjs/runner");
+const { autoRetry } = require("@grammyjs/auto-retry");
+const { canWatchEpisode, recordWatch, formatStatus, isUserVip } = require("./subscription-manager");
+const { findVideo, registerVideo, deliverProtectedVideo } = require("./video-vault");
+const { registerVipPayment } = require("./vip-payment");
+const { registerForceSubscribe } = require("./force-subscribe");
+const { fetchEpisodeAbyssFromAllMirrors, speculativePrefetch, isAbyssUrl, MIRROR_DOMAINS } = require("./mirror-manager");
+const { discoverAnimeSeries } = require("./anime-discovery");
+const { extractAnimeCenter } = require("./animecenter-parser");
+
+const ALLOWED_ANIME_DOMAINS = [
+  "animesalt.cx", "www.animesalt.cx",
+  "animesalttv.to", "www.animesalttv.to",
+  "animesalt.at", "www.animesalt.at",
+  "animesalt.me", "www.animesalt.me",
+  "animecenter.pages.dev"
+];
+function isAllowedAnimeHost(hostname) {
+  return ALLOWED_ANIME_DOMAINS.includes(String(hostname || "").toLowerCase());
+}
+
+const token = process.argv[2] || process.env.TELEGRAM_BOT_TOKEN;
+const ownerId = process.env.TELEGRAM_OWNER_ID;
+if (!token || !/^\d+$/.test(ownerId || "")) {
+  throw new Error("Check your TELEGRAM_BOT_TOKEN and TELEGRAM_OWNER_ID in .env");
+}
+const bot = new Bot(token);
+
+bot.init().then(() => {
+  console.log(`🤖 Bot active as @${bot.botInfo.username} (ID: ${bot.botInfo.id})`);
+}).catch((err) => {
+  console.warn("⚠️ Bot init warning:", err.message);
+});
+
+// Telegram rate limit resilience: auto-retries when hitting Telegram limits
+bot.api.config.use(autoRetry({
+  maxRetryAttempts: 3,
+  maxDelaySeconds: 10
+}));
+
+// Process messages concurrently across different users, while keeping same-user messages sequential
+bot.use(sequentialize((ctx) => {
+  const id = ctx.chat?.id || ctx.from?.id;
+  return id ? String(id) : undefined;
+}));
+
+let runner = null;
+
+// Pure Native Mode: AI generation removed (0 tokens, zero API cost)
+let history = [];
+const userHistories = new Map();
+const activeUsers = new Set();
+const activeBulkUsers = new Set();
+
+const isOwner = (ctx) => String(ctx.from?.id) === ownerId;
+const isUserBusy = (userId) => activeUsers.has(String(userId));
+const setUserBusy = (userId) => activeUsers.add(String(userId));
+const clearUserBusy = (userId) => activeUsers.delete(String(userId));
+
+function getUserHistory(userId) {
+  const uid = String(userId);
+  if (!userHistories.has(uid)) {
+    if (uid === ownerId && Array.isArray(state?.conversation)) {
+      userHistories.set(uid, [...state.conversation]);
+    } else {
+      userHistories.set(uid, []);
+    }
+  }
+  return userHistories.get(uid);
+}
+
+function setUserHistory(userId, newHistory) {
+  const uid = String(userId);
+  userHistories.set(uid, newHistory);
+  if (uid === ownerId && typeof state !== "undefined" && state) {
+    state.conversation = newHistory;
+    saveState();
+  }
+  if (userHistories.size > 500) {
+    const oldestKey = userHistories.keys().next().value;
+    userHistories.delete(oldestKey);
+  }
+}
+
+// Concurrency limiter for outbound scraping to prevent anime websites from blocking IP
+function createConcurrencyLimiter(maxConcurrent = 3) {
+  let active = 0;
+  const queue = [];
+  const next = () => {
+    if (active >= maxConcurrent || queue.length === 0) return;
+    active++;
+    const { fn, resolve, reject } = queue.shift();
+    Promise.resolve()
+      .then(fn)
+      .then(resolve, reject)
+      .finally(() => {
+        active--;
+        next();
+      });
+  };
+  return (fn) => new Promise((resolve, reject) => {
+    queue.push({ fn, resolve, reject });
+    next();
+  });
+}
+const scrapeLimit = createConcurrencyLimiter(3);
+
+const episodeCache = new Map();
+const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours high-capacity cache
+const MAX_CACHE_SIZE = 5000;
+
+async function getCachedAbyssLinks(episodeUrl) {
+  const cached = episodeCache.get(episodeUrl);
+  if (cached && Date.now() < cached.expiresAt) {
+    console.log("⚡ In-memory Episode cache HIT");
+    return cached.links;
+  }
+  const redisKey = `ryvan:cache:abyss:${crypto.createHash("md5").update(episodeUrl).digest("hex")}`;
+  if (typeof REMOTE_ENABLED !== "undefined" && REMOTE_ENABLED) {
+    try {
+      const remote = await remoteCommand(["GET", redisKey]);
+      if (remote) {
+        const parsed = JSON.parse(remote);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          episodeCache.set(episodeUrl, { links: parsed, expiresAt: Date.now() + CACHE_TTL });
+          console.log("⚡ Upstash Redis Episode cache HIT");
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn("Redis cache read error:", e.message);
+    }
+  }
+  console.log("🌐 Episode cache MISS — scraping from source");
+  const links = await getEpisodeAbyssLinks(episodeUrl);
+  // Cache successful results only
+  if (links.length > 0) {
+    episodeCache.set(episodeUrl, {
+      links,
+      expiresAt: Date.now() + CACHE_TTL
+    });
+    if (typeof REMOTE_ENABLED !== "undefined" && REMOTE_ENABLED) {
+      remoteCommand(["SET", redisKey, JSON.stringify(links), "EX", 86400]).catch(() => {});
+    }
+  }
+  // Prevent unbounded cache growth
+  if (episodeCache.size > MAX_CACHE_SIZE) {
+    const oldestKey = episodeCache.keys().next().value;
+    episodeCache.delete(oldestKey);
+  }
+  return links;
+}
+bot.use(async (ctx, next) => {
+  if (ctx.chat?.type !== "private") {
+    return;
+  }
+  await next();
+});
+bot.command("start", async (ctx) => {
+  if (isOwner(ctx)) {
+    await ctx.reply(
+      "🤖 RYVAN AI Command Center\n" +
+      "🔐 Owner verified\n" +
+      "🧠 Gemini AI Brain ready!\n\n" +
+      "Send any anime episode name or command (e.g. /help, /episode, /bulk, /jobs, /status)."
+    );
+  } else {
+    await ctx.reply(
+      "👋 Welcome to RYVAN Anime & AI Assistant!\n\n" +
+      "🎬 Search Episode: /episode <anime> | <season> | <ep>\n" +
+      "   Shortcut: Type `Solo Leveling s1 e2 Hindi`\n" +
+      "📥 Download Season CSV: /bulk <anime> | <season>\n" +
+      "🔗 Extract Abyss Links: /abyss <url>\n" +
+      "🌐 Inspect Links: /links <url>\n" +
+      "💬 Or chat with me directly in English, Hindi, or Hinglish!\n\n" +
+      "Type /help to see all available commands."
+    );
+  }
+});
+bot.command("help", async (ctx) => {
+  await ctx.reply(
+    "🤖 *RYVAN Assistant Commands*:\n\n" +
+    "🎬 *Episodes & Anime*:\n" +
+    "• `/episode <anime> | <season> | <ep>` — Search specific episode\n" +
+    "• Shortcut: `Solo Leveling s1 e2 Hindi` or `Attack on Titan s4 e1`\n" +
+    "• `/bulk <anime> | <season>` — Scan & export entire season links (CSV)\n" +
+    "• `/seasons <anime> | <season>` — Queue multi-season extraction\n" +
+    "• `/abyss <url>` — Extract player streaming links from AnimeSalt episode\n\n" +
+    "👑 *VIP & Membership*:\n" +
+    "• `/vip` or `/premium` — Unlock 6-Month Unlimited Pass (No cooldown)\n" +
+    "• `/myplan` — Check your remaining free episodes or VIP expiry\n\n" +
+    "🌐 *Web & Tools*:\n" +
+    "• `/links <url>` — Extract public links from AnimeSalt page\n" +
+    "• `/sites` — List configured metadata sites\n" +
+    "• `/siteinfo <url>` — Inspect webpage metadata\n" +
+    "• `/playerinfo <url>` — Inspect player metadata\n" +
+    "• `/repo <owner/repo>` — Inspect GitHub repository\n" +
+    "• `/health` — Bot health & uptime status\n\n" +
+    "💬 *Quick Anime Search*:\n" +
+    "Type any anime name (e.g. `Solo Leveling` or `Naruto`) to browse seasons and watch directly!"
+  );
+});
+bot.command("reset", async (ctx) => {
+  setUserHistory(ctx.from?.id, []);
+  await ctx.reply("🧹 Cache reset.");
+});
+async function generateWithFallback(prompt) {
+  return { text: "Native Mode: Direct processing (0 AI tokens used)." };
+}
+bot.command("repo", async (ctx) => {
+  const repo = ctx.match?.trim() || "";
+  if (!/^[\w.\-]+\/[\w.\-]+$/.test(repo)) {
+    return ctx.reply(
+      "Usage: /repo owner/repository\n" +
+      "Example: /repo grammyjs/grammY"
+    );
+  }
+  await ctx.reply("🔍 Fetching repository details...");
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${repo}`,
+      {
+        headers: {
+          Accept: "application/vnd.github+json",
+          "User-Agent": "RYVAN-Anime-Bot"
+        },
+        signal: AbortSignal.timeout(15000)
+      }
+    );
+    if (res.status === 404) {
+      return ctx.reply("❌ Repository not found. Ensure it is public.");
+    }
+    if (!res.ok) {
+      throw new Error(`GitHub HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    const result =
+      "📂 *GitHub Repository Details*\n\n" +
+      `📦 *Name*: \`${data.full_name}\`\n` +
+      `📝 *Description*: ${data.description || "None"}\n` +
+      `⭐ *Stars*: ${data.stargazers_count} | 🍴 *Forks*: ${data.forks_count}\n` +
+      `🐛 *Open Issues*: ${data.open_issues_count}\n` +
+      `💻 *Language*: ${data.language || "Unknown"}\n` +
+      `🕒 *Updated*: ${data.updated_at || "Unknown"}\n` +
+      `🔗 [View on GitHub](${data.html_url})`;
+    await ctx.reply(result, { parse_mode: "Markdown", link_preview_options: { is_disabled: true } });
+  } catch (err) {
+    console.error("GitHub fetch:", err.message);
+    await ctx.reply(`❌ Repository lookup failed: ${err.message}`);
+  } finally {
+    clearUserBusy(userId);
+  }
+});
+const githubTool = {
+  name: "get_github_repo",
+  description:
+    "Get public GitHub repository metadata when the user asks about a specific GitHub repository.",
+  parametersJsonSchema: {
+    type: "object",
+    properties: {
+      repository: {
+        type: "string",
+        description: "GitHub owner/repository, e.g. googleapis/js-genai"
+      }
+    },
+    required: ["repository"]
+  }
+};
+async function getGithubRepo(repository) {
+  if (
+    typeof repository !== "string" ||
+    !/^[\w.\-]+\/[\w.\-]+$/.test(repository) ||
+    repository.length > 200
+  ) {
+    return { error: "Invalid repository format" };
+  }
+  const res = await fetch(
+    `https://api.github.com/repos/${repository}`,
+    {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": "RYVAN-AI-Command-Center"
+      },
+      signal: AbortSignal.timeout(15000)
+    }
+  );
+  if (!res.ok) {
+    return { error: `GitHub API HTTP ${res.status}` };
+  }
+  const data = await res.json();
+  return {
+    name: data.full_name,
+    description: data.description,
+    language: data.language,
+    stars: data.stargazers_count,
+    forks: data.forks_count,
+    open_issues_or_prs: data.open_issues_count,
+    updated_at: data.updated_at,
+    url: data.html_url
+  };
+}
+const cheerio = require("cheerio");
+bot.command("links", async (ctx) => {
+  const input = ctx.match?.trim() || "";
+  try {
+    const url = new URL(input);
+    // Allow any verified AnimeSalt mirror domain (cx, to, at, me)
+    if (url.protocol !== "https:" || !isAllowedAnimeHost(url.hostname)) {
+      await ctx.reply(
+        "❌ Please provide a valid AnimeSalt HTTPS URL (e.g. animesalt.cx, animesalttv.to, animesalt.at, animesalt.me)."
+      );
+      return;
+    }
+    const response = await fetch(url.href, {
+      headers: {
+        "User-Agent": "RYVAN-AI-Command-Center"
+      },
+      redirect: "error",
+      signal: AbortSignal.timeout(15000)
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const html = await response.text();
+    const $ = cheerio.load(html);
+    const links = [];
+    $("a[href]").each((_, element) => {
+      const href = $(element).attr("href");
+      const label = $(element).text().trim();
+      if (!href) return;
+      try {
+        const link = new URL(href, url).href;
+        if (
+          link.startsWith("https://") ||
+          link.startsWith("http://")
+        ) {
+          links.push({ label, url: link });
+        }
+      } catch { }
+    });
+    const unique = [...new Map(
+      links.map(item => [item.url, item])
+    ).values()];
+    const report = unique.slice(0, 15)
+      .map((item, index) =>
+        `${index + 1}. ${item.label || "Link"}\n${item.url}`
+      )
+      .join("\n\n");
+      await ctx.reply(
+      `🔍 Public links found: ${unique.length}\n\n` +
+      (report || "No public anchor links found."),
+      { link_preview_options: { is_disabled: true } }
+    );
+  } catch (error) {
+    console.error("Link reader:", error.message);
+    await ctx.reply(isAccessBlocked(error) ? ACCESS_BLOCKED_MESSAGE : "❌ Could not read page links.");
+  }
+});
+// The origin refused this server's request. Never retry or route around an access denial.
+function accessError(status) {
+  return status === 403 ? new Error("ACCESS_BLOCKED: HTTP 403 — website denied access from this environment") : null;
+}
+function isAccessBlocked(error) { return /ACCESS_BLOCKED|(?:^|\D)403(?:\D|$)/i.test(String(error?.message || error)); }
+const ACCESS_BLOCKED_MESSAGE = "🚫 ACCESS_BLOCKED (HTTP 403): Website ne cloud/server request deny ki hai. No retries. Check authorized access with the site owner; Render, Redis aur Telegram ka issue nahi.";
+const RETRYABLE_HTTP_CODES = new Set([500, 502, 503, 504]);
+async function fetchWithRetry(url, options = {}) {
+  return scrapeLimit(async () => {
+    const MAX_ATTEMPTS = 3;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const response = await fetch(url, {
+        ...options,
+        redirect: "error",
+        signal: AbortSignal.timeout(15000)
+      });
+      if (response.status === 403) throw accessError(403);
+      if (response.status === 429) {
+        console.warn(
+          "🛑 HTTP 429: Discovery stopped to respect website rate limits."
+        );
+        throw new Error("DISCOVERY_RATE_LIMITED");
+      }
+      if (response.ok) return response;
+      if (!RETRYABLE_HTTP_CODES.has(response.status) || attempt === MAX_ATTEMPTS) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const delay = 2000 * 2 ** (attempt - 1);
+      console.log(`⏳ HTTP ${response.status}. Retry in ${delay}ms`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  });
+}
+async function getEpisodeAbyssLinks(episodeUrl) {
+  try {
+    const sourceUrl = new URL(episodeUrl);
+    if (sourceUrl.hostname.toLowerCase() === "animecenter.pages.dev") {
+      return await extractAnimeCenter(sourceUrl.href);
+    }
+  } catch {}
+  let slug = "";
+  let season = 1;
+  let episode = 1;
+
+  try {
+    const url = new URL(episodeUrl);
+    const m = url.pathname.match(/\/episode\/([a-z0-9-]+?)-(\d+)x(\d+)\/?$/i);
+    if (m) {
+      slug = m[1];
+      season = Number(m[2]);
+      episode = Number(m[3]);
+    } else {
+      const parts = url.pathname.split("/").filter(Boolean);
+      slug = parts[parts.length - 1] || "";
+    }
+  } catch {
+    slug = String(episodeUrl).toLowerCase().replace(/[^a-z0-9-]+/g, "-");
+  }
+
+  // Multi-Mirror Fallback Chain: animesalt.cx -> animesalttv.to -> animesalt.at -> animesalt.me
+  const result = await fetchEpisodeAbyssFromAllMirrors(slug, season, episode);
+  if (result.success && Array.isArray(result.links) && result.links.length > 0) {
+    return result.links.map(entry => ({
+      language: entry.language,
+      link: entry.playerUrl,
+      mirror: entry.mirror || result.sourceMirror
+    }));
+  }
+
+  return [];
+}
+const uploaderBotToken = process.env.UPLOADER_BOT_TOKEN || "9023064138:AAFWVPla12saugdr5MsewpLp77dxGVffQP0";
+const vaultStorageChannelId = String(process.env.STORAGE_CHANNEL_ID || "-1004364518808").trim();
+
+async function postEpisodeRequestToVault({ anime, season, episode, requestedLang, links, episodeUrl, userId, username }) {
+  const tokenToUse = uploaderBotToken || process.env.TELEGRAM_BOT_TOKEN;
+  if (!tokenToUse || !vaultStorageChannelId) return;
+
+  const linksFormatted = (links || [])
+    .map(item => `• *${item.language}*: \`${item.playerUrl || item.link}\``)
+    .join("\n") || "No direct player link";
+
+  const userTag = username ? `@${username}` : `User ID: \`${userId}\``;
+  const text =
+    `📥 *New Episode Stream Request*\n\n` +
+    `🎬 *Anime:* *${anime}*\n` +
+    `📺 *Season:* ${season} • *Episode:* ${episode}\n` +
+    `🌐 *Audio:* ${requestedLang}\n` +
+    `👤 *Requested By:* ${userTag}\n\n` +
+    `🔗 *Extracted Abyss Streaming Links:*\n${linksFormatted}\n\n` +
+    `📄 *Source Page:* [Direct Episode Page](${episodeUrl})\n\n` +
+    `💡 *To link full video to this episode, upload/forward the video here with caption:*\n` +
+    `\`${anime} | ${season} | ${episode} | ${requestedLang}\``;
+
+  const inlineKeyboard = new InlineKeyboard();
+  const firstLink = links && links[0] && (links[0].playerUrl || links[0].link);
+  const renderBaseUrl = (process.env.RENDER_EXTERNAL_URL || "").replace(/\/+$/, "");
+  let playerUrl = firstLink;
+  if (renderBaseUrl && firstLink) {
+    playerUrl = `${renderBaseUrl}/player?src=${encodeURIComponent(firstLink)}&title=${encodeURIComponent(`${anime} S${season}E${episode}`)}`;
+  }
+
+  if (playerUrl && /^https?:\/\//i.test(playerUrl)) {
+    inlineKeyboard.url("▶️ Open Clean Player", playerUrl);
+  } else if (firstLink && /^https?:\/\//i.test(firstLink)) {
+    inlineKeyboard.url("▶️ Open Player Link", firstLink);
+  }
+
+  // 1. Try sending via Uploader Bot
+  try {
+    const uploaderClient = new Bot(tokenToUse);
+    await uploaderClient.api.sendMessage(vaultStorageChannelId, text, {
+      parse_mode: "Markdown",
+      link_preview_options: { is_disabled: true },
+      reply_markup: inlineKeyboard
+    });
+    console.log(`📤 [Vault Auto-Post] Sent ${anime} S${season}E${episode} to ${vaultStorageChannelId}`);
+    return;
+  } catch (err) {
+    console.warn("⚠️ Vault Auto-Post via Uploader Bot error:", err.message);
+  }
+
+  // 2. Fallback: send via Customer Bot
+  try {
+    await bot.api.sendMessage(vaultStorageChannelId, text, {
+      parse_mode: "Markdown",
+      link_preview_options: { is_disabled: true },
+      reply_markup: inlineKeyboard
+    });
+    console.log(`📤 [Vault Auto-Post Fallback] Sent ${anime} S${season}E${episode} to ${vaultStorageChannelId}`);
+  } catch (err2) {
+    // 3. Fallback without Markdown
+    try {
+      await bot.api.sendMessage(vaultStorageChannelId, text.replace(/[*`_]/g, ""), {
+        reply_markup: inlineKeyboard
+      });
+    } catch (err3) {
+      console.error("❌ Vault Auto-Post completely failed:", err3.message);
+    }
+  }
+}
+
+async function handleEpisode(ctx) {
+  const input = (
+    typeof ctx.episodeInput === "string"
+      ? ctx.episodeInput
+      : ctx.match || ""
+  ).trim();
+  const parts = input.split("|").map(s => s.trim());
+  if (parts.length !== 3) {
+    return ctx.reply(
+      "Usage:\n/episode Anime Name | Season | Episode\n\n" +
+      "Example:\n/episode Attack on Titan | 4 | 7"
+    );
+  }
+  const [anime, seasonText, episodeText] = parts;
+  const season = Number(seasonText);
+  const episode = Number(episodeText);
+  if (
+    !anime ||
+    !/^[\w\s:.'-]{1,100}$/.test(anime) ||
+    !Number.isInteger(season) ||
+    !Number.isInteger(episode) ||
+    season < 1 || season > 100 ||
+    episode < 1 || episode > 1000
+  ) {
+    return ctx.reply("❌ Invalid anime, season or episode.");
+  }
+  const userId = ctx.from?.id;
+  const accessCheck = canWatchEpisode(state, userId);
+  const cooldownHours = process.env.COOLDOWN_HOURS || 16;
+  if (!accessCheck.allowed) {
+    const hoursLeft = accessCheck.remainingHours || cooldownHours;
+    return ctx.reply(
+      `⏳ *Free Limit Reached (2/2 Episodes Watched)*\n\n` +
+      `Aapke 2 free episodes complete ho chuke hain.\n` +
+      `⏱️ Agle 2 free episodes unlock honge: *~${hoursLeft} hours me* (${accessCheck.unlockAt?.slice(0, 16).replace("T", " ")})\n\n` +
+      `👑 *Wait nahi karna? Instant 6-Month Pass lein!*\n` +
+      `Use /vip to unlock unlimited streaming directly in Telegram without any cooldown!`,
+      { parse_mode: "Markdown" }
+    );
+  }
+  const slug = anime.toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+
+  // 1. Direct Secret Vault delivery if protected video file is available
+  const requestedLang = ctx.requestedLanguage || "Hindi";
+  const vaultVideo = findVideo(state, slug, season, episode, requestedLang);
+  if (vaultVideo && vaultVideo.fileId) {
+    try {
+      await deliverProtectedVideo(bot, ctx.chat.id, vaultVideo,
+        `🎬 *${anime}*\nSeason ${season} • Episode ${episode} (${requestedLang})\n\n🔒 Protected Stream • Do not share`
+      );
+      const watchResult = recordWatch(state, userId);
+      saveState();
+      if (watchResult.cooldownTriggered) {
+        await ctx.reply(
+          `⚠️ *Notice:* Yeh aapka 2nd free episode tha. Agle free episodes ab *${cooldownHours} ghante baad* unlock honge.\n` +
+          `👑 Unlimited bina rukawat dekhne ke liye /vip se 6-Month Pass lein!`
+        );
+      }
+      return;
+    } catch (deliveryError) {
+      console.warn("Direct vault video delivery error:", deliveryError.message);
+    }
+  }
+  // 2. 10x Turbo Multi-Mirror Abyss Extraction (RAM Cache -> Parallel Race in 150ms)
+  try {
+    const mirrorResult = await fetchEpisodeAbyssFromAllMirrors(slug, season, episode, ctx.requestedLanguage || "All");
+    if (!mirrorResult.success || !mirrorResult.links || mirrorResult.links.length === 0) {
+      return ctx.reply(
+        `❌ Episode not found on AnimeSalt mirrors.\n\n` +
+        `• Anime: *${anime}*\n` +
+        `• Season: ${season} • Episode: ${episode}\n\n` +
+        `💡 Agar title me spelling mistake ho toh exact title try karein (e.g. \`Solo Leveling\` ya \`Black Clover\`).`,
+        { parse_mode: "Markdown" }
+      );
+    }
+
+    const watchResult = recordWatch(state, userId);
+    saveState();
+
+    let cooldownNotice = "";
+    if (watchResult.cooldownTriggered) {
+      cooldownNotice = `\n\n⚠️ *Notice:* Yeh aapka 2nd free episode tha. Agle free episodes ab *${cooldownHours} ghante baad* unlock honge. Unlimited access ke liye /vip karein!`;
+    }
+
+    const hostMirror = String(mirrorResult.sourceMirror || "animesalt.cx").replace(/\s*\(.*?\)/, "").trim();
+    const episodeUrl = `https://${hostMirror}/episode/${slug}-${season}x${episode}/`;
+
+    // Automatically post episode details and Abyss links to Ryvan Secret Vault channel
+    postEpisodeRequestToVault({
+      anime,
+      season,
+      episode,
+      requestedLang,
+      links: mirrorResult.links,
+      episodeUrl,
+      userId,
+      username: ctx.from?.username || ""
+    }).catch(() => {});
+
+    const firstLink = mirrorResult.links && mirrorResult.links[0] && (mirrorResult.links[0].playerUrl || mirrorResult.links[0].link);
+    const renderBaseUrl = (process.env.RENDER_EXTERNAL_URL || "").replace(/\/+$/, "");
+    let webAppPlayerUrl = "";
+    if (renderBaseUrl && firstLink) {
+      webAppPlayerUrl = `${renderBaseUrl}/player?src=${encodeURIComponent(firstLink)}&title=${encodeURIComponent(`${anime} S${season}E${episode}`)}`;
+    }
+
+    const navKeyboard = new InlineKeyboard();
+    if (webAppPlayerUrl && webAppPlayerUrl.startsWith("https://")) {
+      navKeyboard.webApp("▶️ Play Episode (Inside Telegram)", webAppPlayerUrl).row();
+      navKeyboard.url("🌐 Watch on Website", episodeUrl).row();
+    } else if (firstLink && firstLink.startsWith("https://")) {
+      navKeyboard.url("▶️ Watch Stream", firstLink).row();
+      navKeyboard.url("🌐 Watch on Website", episodeUrl).row();
+    } else {
+      navKeyboard.url("🌐 Watch Episode in Web Player", episodeUrl).row();
+    }
+
+    if (episode > 1) {
+      navKeyboard.text(`◀️ Ep ${episode - 1}`, `play:${slug}:${season}:${episode - 1}`);
+    }
+    navKeyboard.text("📜 All Episodes", `season:${slug}:${season}`);
+    navKeyboard.text(`Ep ${episode + 1} ▶️`, `play:${slug}:${season}:${episode + 1}`);
+
+    const languagesAvailable = mirrorResult.links.map(l => l.language).filter(Boolean).join(", ") || "Hindi, Japanese";
+
+    await ctx.reply(
+      `🎬 *${anime}*\n` +
+      `Season ${season} • Episode ${episode}\n\n` +
+      `📁 *Ryvan Secret Vault Update:*\n` +
+      `Is episode ke Abyss links ko @RyvanStorageUploaderBot ne aapke [Ryvan Secret Vault Channel](https://t.me/+-bQqzM9y6rQ2Mzg1) me post kar diya hai!\n\n` +
+      `🌐 *Web Player (Watch Now):*\n` +
+      `Aap neeche button par click karke direct episode dekh sakte hain (Available: ${languagesAvailable}).\n\n` +
+      `💡 *Direct Video Kaise Milegi?*\n` +
+      `Jaise hi is episode ki video file Vault channel me aayegi, yeh bot sabhi users ko direct full HD video file DM me bhej dega!` +
+      cooldownNotice,
+      {
+        parse_mode: "Markdown",
+        link_preview_options: { is_disabled: true },
+        reply_markup: navKeyboard
+      }
+    );
+  } catch (error) {
+    console.error("10x Episode search error:", error.message);
+    await ctx.reply(isAccessBlocked(error) ? ACCESS_BLOCKED_MESSAGE : "❌ Episode search failed.");
+  }
+};
+bot.command("episode", handleEpisode);
+async function discoverSeasonEpisodes(slug, season, knownEpisodes) {
+  const episodes = new Map(knownEpisodes);
+  const MAX_EPISODES = 30;
+
+  // 1. Parallel Probe candidate mirrors to find which mirror hosts this season (10x faster via Promise.any)
+  const candidateMirrors = [
+    "https://animesalt.cx",
+    "https://animesalttv.to",
+    "https://animesalt.at",
+    "https://animecenter.pages.dev"
+  ];
+
+  let activeMirror = "https://animesalt.cx";
+  try {
+    const probePromises = candidateMirrors.map(mirror =>
+      fetch(`${mirror}/episode/${slug}-${season}x1/`, {
+        headers: { "User-Agent": "Mozilla/5.0" },
+        signal: AbortSignal.timeout(3500)
+      }).then(res => {
+        if (res.ok) return mirror;
+        throw new Error("404");
+      })
+    );
+    activeMirror = await Promise.any(probePromises);
+    console.log(`🎯 Season ${season} discovered in parallel race on active mirror: ${activeMirror}`);
+  } catch {
+    console.log(`⚠️ Season ${season} Episode 1 returned 404 across candidate mirrors. Skipping.`);
+    return [];
+  }
+
+  // 2. 10x Turbo Batch Discovery (Concurrent batches of 6 episodes, 0 artificial delay)
+  const BATCH_SIZE = 6;
+  let seasonEnded = false;
+
+  for (let startEp = 1; startEp <= MAX_EPISODES && !seasonEnded; startEp += BATCH_SIZE) {
+    const batchEps = [];
+    for (let ep = startEp; ep < startEp + BATCH_SIZE && ep <= MAX_EPISODES; ep++) {
+      if (!episodes.has(ep)) batchEps.push(ep);
+    }
+    if (!batchEps.length) continue;
+
+    const batchResults = await Promise.allSettled(
+      batchEps.map(async (ep) => {
+        const url = `${activeMirror}/episode/${slug}-${season}x${ep}/`;
+        try {
+          const res = await fetch(url, {
+            method: "GET",
+            headers: { "User-Agent": "Mozilla/5.0" },
+            signal: AbortSignal.timeout(4500)
+          });
+          if (res.status === 404) return { ep, url, ok: false, status: 404 };
+          if (res.ok) {
+            const html = await res.text();
+            if (html.includes("iframe") || html.includes("abyss") || html.includes("options-1")) {
+              return { ep, url, ok: true, status: 200 };
+            }
+          }
+          return { ep, url, ok: false, status: res.status };
+        } catch (err) {
+          return { ep, url, ok: false, error: err.message };
+        }
+      })
+    );
+
+    let batchHits = 0;
+    for (const item of batchResults) {
+      if (item.status === "fulfilled" && item.value.ok) {
+        episodes.set(item.value.ep, item.value.url);
+        batchHits++;
+      } else if (item.status === "fulfilled" && item.value.status === 404) {
+        if (episodes.size > 0) {
+          seasonEnded = true;
+        }
+      }
+    }
+
+    if (episodes.size > 0 && batchHits === 0) {
+      seasonEnded = true;
+    }
+  }
+
+  return [...episodes.entries()].sort((a, b) => a[0] - b[0]);
+}
+
+async function collectBulkLinks(sorted, language = "All") {
+  const results = [];
+  const MAX_TEST_EPISODES = 30;
+  const items = sorted.slice(0, MAX_TEST_EPISODES);
+
+  // 10x Concurrent Worker Pool (Batches of 5 concurrent extractions)
+  const BATCH_SIZE = 5;
+  for (let i = 0; i < items.length; i += BATCH_SIZE) {
+    const chunk = items.slice(i, i + BATCH_SIZE);
+    const chunkResults = await Promise.allSettled(
+      chunk.map(async ([episode, url]) => {
+        const links = await getCachedAbyssLinks(url);
+        const selected = language.toLowerCase() === "all"
+          ? links
+          : links.filter(item =>
+            item.language.toLowerCase() === language.toLowerCase()
+          );
+        return { episode, selected, count: selected.length };
+      })
+    );
+
+    for (const cr of chunkResults) {
+      if (cr.status === "fulfilled") {
+        const { episode, selected } = cr.value;
+        for (const item of selected) {
+          results.push({
+            episode,
+            language: item.language,
+            playerUrl: item.link,
+            status: "SUCCESS",
+            error: ""
+          });
+        }
+        if (selected.length === 0) {
+          results.push({
+            episode,
+            language,
+            playerUrl: "",
+            status: "NOT_AVAILABLE",
+            error: "No matching language link found"
+          });
+        }
+      }
+    }
+  }
+  return results;
+}
+function parseSeasonRange(input) {
+  const text = String(input).trim();
+  // Single season: 2
+  if (/^\d+$/.test(text)) {
+    const season = Number(text);
+    if (season < 1 || season > 100) {
+      throw new Error("Invalid season");
+    }
+    return [season];
+  }
+  // Season range: 1-4
+  const match = /^(\d+)\s*-\s*(\d+)$/.exec(text);
+  if (!match) {
+    throw new Error("Use season format: 1 or 1-4");
+  }
+  const start = Number(match[1]);
+  const end = Number(match[2]);
+  if (
+    start < 1 ||
+    end > 100 ||
+    start > end ||
+    end - start + 1 > 4
+  ) {
+    throw new Error("Maximum 4 consecutive seasons allowed");
+  }
+  return Array.from(
+    { length: end - start + 1 },
+    (_, i) => start + i
+  );
+}
+bot.command("bulk", async (ctx) => {
+  const userId = String(ctx.from?.id);
+  if (activeBulkUsers.has(userId)) {
+    return ctx.reply("⏳ Aapka pehle se ek bulk job chal raha hai. Thoda wait karein.");
+  }
+  if (activeBulkUsers.size >= 3) {
+    return ctx.reply("⏳ Server par maximum bulk jobs chal rahe hain. Kripya 1 minute baad try karein.");
+  }
+  activeBulkUsers.add(userId);
+  const input = ctx.match?.trim() || "";
+  const parts = input.split("|").map(x => x.trim());
+  if (parts.length < 2 || parts.length > 3) {
+    return ctx.reply(
+      "Usage: /bulk Anime Name | Season | Language\n" +
+      "Example: /bulk Attack on Titan | 1 | Hindi"
+    );
+  }
+  const [anime, seasonText, language = "All"] = parts;
+  const season = Number(seasonText);
+  if (
+    !/^[\w\s:.'-]{1,100}$/.test(anime) ||
+    !Number.isInteger(season) ||
+    season < 1 || season > 100
+  ) {
+    return ctx.reply("❌ Invalid anime or season.");
+  }
+  const slug = anime.toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  const discoveredSeries = await discoverAnimeSeries(anime);
+  const discoveredSlug = discoveredSeries.found ? discoveredSeries.slug : slug;
+  const seriesHost = discoveredSeries.found ? discoveredSeries.mirror : "animesalt.cx";
+  const seriesUrl = `https://${seriesHost}/series/${discoveredSlug}/`;
+  bulkBusy = true;
+  try {
+    await ctx.reply("🔍 Scanning season episode listing...");
+    const response = await scrapeLimit(() => fetch(seriesUrl, {
+      redirect: "error",
+      signal: AbortSignal.timeout(15000)
+    }));
+    if (response.status === 403) return ctx.reply(ACCESS_BLOCKED_MESSAGE);
+    if (!response.ok) {
+      return ctx.reply(
+        `❌ Series page HTTP ${response.status}`
+      );
+    }
+    const $ = cheerio.load(await response.text());
+    const episodes = new Map();
+    $("a[href]").each((_, el) => {
+      try {
+        const url = new URL($(el).attr("href"), seriesUrl);
+        if (url.hostname !== seriesHost) return;
+        const pattern = new RegExp(
+
         );
         const match = url.pathname.match(pattern);
         if (match) {
@@ -862,7 +1739,7 @@ bot.command("bulk", async (ctx) => {
       } catch { }
     });
     const sorted = await discoverSeasonEpisodes(
-      slug,
+      discoveredSlug,
       season,
       episodes
     );
