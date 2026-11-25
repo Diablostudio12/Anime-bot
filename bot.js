@@ -1444,6 +1444,19 @@ bot.command("abyss", async (ctx) => {
       );
     }
 
+    if (!input.includes("|")) {
+      try {
+        const directUrl = new URL(input);
+        if (directUrl.hostname.toLowerCase() === "animecenter.pages.dev") {
+          const links = await extractAnimeCenter(directUrl.href);
+          const message = links.map(item => `• *${item.language}*: `${item.playerUrl}``).join("\n\n");
+          return ctx.reply(`🎬 *AnimeCenter Player Links*\n\n${message}`, { parse_mode: "Markdown", link_preview_options: { is_disabled: true } });
+        }
+      } catch (error) {
+        if (/AnimeCenter|episode path/i.test(String(error.message))) return ctx.reply(`❌ ${error.message}`);
+      }
+    }
+
     let slug = "";
     let season = 1;
     let episode = 1;
