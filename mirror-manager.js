@@ -21,8 +21,7 @@ const MIRROR_DOMAINS = [
   { name: "animesalt.cx", origin: "https://animesalt.cx", type: "torofilm" },
   { name: "animesalttv.to", origin: "https://animesalttv.to", type: "torofilm-abyss" },
   { name: "animesalt.at", origin: "https://animesalt.at", type: "abyss-route" },
-  { name: "animesalt.me", origin: "https://animesalt.me", type: "trigger-episode" },
-  { name: "animecenter.pages.dev", origin: "https://animecenter.pages.dev", type: "animecenter" }
+  { name: "animesalt.me", origin: "https://animesalt.me", type: "trigger-episode" }
 ];
 
 // 2. Persistent Dual-Tier Cache (RAM Map + Auto-Synced Disk Store)
