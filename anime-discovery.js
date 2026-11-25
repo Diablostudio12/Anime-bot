@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { fetch } = require("undici");
 
-const MIRRORS = ["animesalt.cx", "animesalttv.to", "animesalt.at", "animesalt.me", "animecenter.pages.dev"];
+const MIRRORS = ["animesalt.cx", "animesalttv.to", "animesalt.at", "animesalt.me"];
 const CACHE_FILE = path.join(__dirname, "ryvan-data", "series-cache.json");
 
 // In-memory cache for instant 0ms responses
