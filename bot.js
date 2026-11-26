@@ -1939,7 +1939,7 @@ async function handlePrimeHindiBulkRequest(req,res){
     if (process.env.PORT) {
       try {
         const http = require("node:http");
-        const portNum = Number(process.env.PORT || 10000);
+        const portNum = Number(process.env.ANIME_BOT_BULK_PORT || process.env.PORT || 10000);
         const dummyServer = http.createServer((req,res)=>handleBotHttp(req,res,'polling','', ''));
         dummyServer.on("error", () => {}); // ignore EADDRINUSE if start-all.js already bound it
         dummyServer.listen(portNum, "0.0.0.0", () => {
