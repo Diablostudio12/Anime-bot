@@ -1941,9 +1941,6 @@ async function handlePrimeHindiBulkRequest(req,res) {
     if(!/^[\w\s:.'-]{1,100}$/.test(anime)||!Number.isSafeInteger(season)||season<1||season>100||!['Hindi','Tamil','Telugu','Kannada','English','Japanese','All'].includes(language)){
       res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'Invalid anime, season or language'}));return;
     }
-    if(!/^[\w\s:.'-]{1,100}$/.test(anime)||!Number.isSafeInteger(season)||season<1||season>100||!['Hindi','Tamil','Telugu','Kannada','English','Japanese','All'].includes(language)){
-      res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'Invalid anime, season or language'}));return;
-    }
     const jobKey='web:'+Date.now()+':'+crypto.randomBytes(4).toString('hex');
     if(activeBulkUsers.size>=3){res.writeHead(429,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'Bot bulk capacity is full'}));return;}
     activeBulkUsers.add(jobKey);bulkBusy=true;
