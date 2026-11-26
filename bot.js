@@ -1890,6 +1890,53 @@ async function shutdown(signal) {
 process.once("SIGTERM", () => { void shutdown("SIGTERM"); });
 process.once("SIGINT", () => { void shutdown("SIGINT"); });
 bot.catch(console.error);
+// Private server-to-server bridge used by Prime Hindi's authenticated admin import.
+async function handlePrimeHindiBulkRequest(req,res) {
+  const expected=String(process.env.ANIME_BOT_BULK_SECRET||''),provided=String(req.headers['x-primehindi-bulk-secret']||'');
+  const crypto=require('node:crypto');
+  if(!expected||provided.length!==expected.length||!crypto.timingSafeEqual(Buffer.from(provided),Buffer.from(expected))){
+    res.writeHead(401,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({error:'Unauthorized'}));return;
+  }
+  let raw='';
+  try {
+    for await(const chunk of req){raw+=chunk.toString('utf8');if(raw.length>65536){res.writeHead(413);res.end();return;}}
+    const input=JSON.parse(raw||'{}'),anime=String(input.anime||'').trim(),season=Number(input.season),language=String(input.language||'').trim();
+    if(!/^[\w\s:.'-]{1,100}$/.test(anime)||!Number.isSafeInteger(season)||season<1||season>100||!['Hindi','Tamil','Telugu','Kannada','English','Japanese','All'].includes(language)){
+      res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'Invalid anime, season or language'}));return;
+    }
+    const jobKey='web:'+Date.now()+':'+crypto.randomBytes(4).toString('hex');
+    if(activeBulkUsers.size>=3){res.writeHead(429,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'Bot bulk capacity is full'}));return;}
+    activeBulkUsers.add(jobKey);bulkBusy=true;
+    try {
+      const slug=anime.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+      const seriesUrl='https://animesalt.cx/series/'+slug+'/';
+      const response=await scrapeLimit(()=>fetch(seriesUrl,{redirect:'error',signal:AbortSignal.timeout(15000)}));
+      if(response.status===403)throw new Error('AnimeSalt access blocked (HTTP 403)');
+      if(!response.ok)throw new Error('Series listing HTTP '+response.status);
+      const $=cheerio.load(await response.text()),episodes=new Map();
+      const episodePattern=new RegExp('^/episode/'+slug+'-'+season+'x([0-9]+)/?$');
+      $('a[href]').each((_,el)=>{try{const u=new URL($(el).attr('href'),seriesUrl);if(u.hostname!=='animesalt.cx')return;const m=u.pathname.match(episodePattern);if(m)episodes.set(Number(m[1]),u.href);}catch{}});
+      const sorted=await discoverSeasonEpisodes(slug,season,episodes),links=await collectBulkLinks(sorted,language);
+      const rows=links.map(x=>({episode:Number(x.episode),language:String(x.language||language),playerUrl:String(x.playerUrl||''),status:String(x.status||'SUCCESS'),error:String(x.error||'')}));
+      const quote=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
+      const csv=[['Episode','Language','Player URL','Status','Error'],...rows.map(x=>[x.episode,x.language,x.playerUrl,x.status,x.error])].map(row=>row.map(quote).join(',')).join(String.fromCharCode(13,10));
+      const filename=slug+'-season-'+season+'-players.csv';
+      res.writeHead(200,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});
+      res.end(JSON.stringify({command:'/seasons '+anime+' | '+season+' | '+language,filename,csv,rows,discoveredEpisodes:sorted.length}));
+    } finally {activeBulkUsers.delete(jobKey);bulkBusy=activeBulkUsers.size>0;}
+  } catch(error) {
+    console.error('[PrimeHindi bulk bridge]',error.message);
+    if(!res.headersSent){res.writeHead(502,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({error:error.message||'Extraction failed'}));}
+  }
+}
+function handleBotHttp(req,res,mode,telegramSecret,webhookPath) {
+  if(req.method==='GET'&&(req.url==='/'||req.url==='/healthz')){res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({status:'ok',bot:'RYVAN',uptime:Math.floor(process.uptime()),storage:REMOTE_ENABLED?'upstash':'ephemeral'}));return true;}
+  if(req.method==='POST'&&req.url==='/admin/bulk-extract'){void handlePrimeHindiBulkRequest(req,res);return true;}
+  if(mode==='webhook'&&req.method==='POST'&&req.url===webhookPath&&req.headers['x-telegram-bot-api-secret-token']===telegramSecret){
+    let body='';req.on('data',chunk=>{body+=chunk;if(body.length>1024*1024)req.destroy();});req.on('end',()=>{let update;try{update=JSON.parse(body);}catch{res.writeHead(400);res.end();return;}res.writeHead(200);res.end('OK');void bot.handleUpdate(update).catch(err=>console.error('Webhook handling:',err));});return true;
+  }
+  res.writeHead(404);res.end();return true;
+}
 async function startApp() {
   await hydrateRemote(); // Abort startup if configured storage is down; never overwrite remote with empty local state.
   markInterruptedOnStartup();
