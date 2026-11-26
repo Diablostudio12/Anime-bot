@@ -1909,14 +1909,11 @@ async function handlePrimeHindiBulkRequest(req,res) {
     activeBulkUsers.add(jobKey);bulkBusy=true;
     try {
       const slug=anime.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
-      const seriesUrl='https://animesalt.cx/series/'+slug+'/';
-      const response=await scrapeLimit(()=>fetch(seriesUrl,{redirect:'error',signal:AbortSignal.timeout(15000)}));
-      if(response.status===403)throw new Error('AnimeSalt access blocked (HTTP 403)');
-      if(!response.ok)throw new Error('Series listing HTTP '+response.status);
-      const $=cheerio.load(await response.text()),episodes=new Map();
-      const episodePattern=new RegExp('^/episode/'+slug+'-'+season+'x([0-9]+)/?$');
-      $('a[href]').each((_,el)=>{try{const u=new URL($(el).attr('href'),seriesUrl);if(u.hostname!=='animesalt.cx')return;const m=u.pathname.match(episodePattern);if(m)episodes.set(Number(m[1]),u.href);}catch{}});
-      const sorted=await discoverSeasonEpisodes(slug,season,episodes),links=await collectBulkLinks(sorted,language);
+      // Reuse the exact season discovery + player extraction engine used by /seasons.
+      // Do not scrape AnimeSalt's series listing here; it can return 403 while the
+      // bot's established mirror-probe workflow still discovers the season.
+      const sorted=await discoverSeasonEpisodes(slug,season,new Map());
+      const links=await collectBulkLinks(sorted,language);
       const rows=links.map(x=>({episode:Number(x.episode),language:String(x.language||language),playerUrl:String(x.playerUrl||''),status:String(x.status||'SUCCESS'),error:String(x.error||'')}));
       const quote=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
       const csv=[['Episode','Language','Player URL','Status','Error'],...rows.map(x=>[x.episode,x.language,x.playerUrl,x.status,x.error])].map(row=>row.map(quote).join(',')).join(String.fromCharCode(13,10));
