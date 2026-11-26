@@ -642,29 +642,6 @@ async function handleEpisode(ctx) {
   }
 };
 bot.command("episode", handleEpisode);
-bot.command("moviecsv", async (ctx) => {
-  const parts = String(ctx.match || "").split("|").map(value => value.trim());
-  if (parts.length !== 3) {
-    return ctx.reply("Usage: /moviecsv Movie Title | Language | Authorized HTTPS Player URL\nExample: /moviecsv Example Film | Hindi | https://licensed-source.example/watch/123");
-  }
-  const [title, language, sourceUrl] = parts;
-  if (!/^[\w\s:.'()!-]{1,140}$/.test(title) ||
-      !["Hindi","Tamil","Telugu","Kannada","English","Japanese","Bangla"].includes(language)) {
-    return ctx.reply("Invalid movie title or language.");
-  }
-  let parsed;
-  try { parsed = new URL(sourceUrl); } catch { return ctx.reply("Source URL must be a valid HTTPS URL."); }
-  if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
-    return ctx.reply("Only a valid HTTPS source URL is accepted.");
-  }
-  const quote = value => '"' + String(value).replace(/"/g, '""') + '"';
-  const csv = [["Movie Title","Language","Authorized Player URL","Status","Error"],[title,language,parsed.href,"PROVIDED","URL supplied by admin; bot did not fetch or verify it."]]
-    .map(row => row.map(quote).join(",")).join(String.fromCharCode(13,10));
-  const filename = title.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"") + "-movie-source.csv";
-  await ctx.replyWithDocument(new InputFile(Buffer.from(csv,"utf8"),filename), {
-    caption: "Movie CSV ready. Season extraction is unchanged. The source URL was not fetched or verified."
-  });
-});
 async function discoverSeasonEpisodes(slug, season, knownEpisodes) {
   const episodes = new Map(knownEpisodes);
   const MAX_EPISODES = 30;
@@ -1923,21 +1900,7 @@ async function handlePrimeHindiBulkRequest(req,res) {
   let raw='';
   try {
     for await(const chunk of req){raw+=chunk.toString('utf8');if(raw.length>65536){res.writeHead(413);res.end();return;}}
-    const input=JSON.parse(raw||'{}'),requestType=String(input.type||'season').trim().toLowerCase(),anime=String(input.anime||input.movieTitle||'').trim(),season=Number(input.season),language=String(input.language||'').trim();
-    if(requestType==='movie'){
-      const sourceUrl=String(input.authorizedPlayerUrl||'').trim();
-      let parsedSource;
-      try{parsedSource=new URL(sourceUrl);}catch{}
-      if(!/^[\w\s:.'()!-]{1,140}$/.test(anime)||!['Hindi','Tamil','Telugu','Kannada','English','Japanese','Bangla'].includes(language)||!parsedSource||parsedSource.protocol!=='https:'||parsedSource.username||parsedSource.password){
-        res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'Movie requires title, supported language and HTTPS source URL'}));return;
-      }
-      const quote=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
-      const row=[anime,language,parsedSource.href,'PROVIDED','URL supplied by admin; not fetched or verified.'];
-      const csv=[['Movie Title','Language','Authorized Player URL','Status','Error'],row].map(line=>line.map(quote).join(',')).join(String.fromCharCode(13,10));
-      res.writeHead(200,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});
-      res.end(JSON.stringify({type:'movie',filename:anime.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')+'-movie-source.csv',csv,rows:[{movieTitle:anime,language,playerUrl:parsedSource.href,status:'PROVIDED',error:'URL supplied by admin; not fetched or verified.'}]}));return;
-    }
-    if(requestType!=='season'){res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'Unsupported bulk request type'}));return;}
+    const input=JSON.parse(raw||'{}'),anime=String(input.anime||'').trim(),season=Number(input.season),language=String(input.language||'').trim();
     if(!/^[\w\s:.'-]{1,100}$/.test(anime)||!Number.isSafeInteger(season)||season<1||season>100||!['Hindi','Tamil','Telugu','Kannada','English','Japanese','All'].includes(language)){
       res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'Invalid anime, season or language'}));return;
     }
