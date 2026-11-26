@@ -1899,7 +1899,7 @@ async function handlePrimeHindiBulkRequest(req,res){
  try{
   for await(const chunk of req){raw+=chunk.toString('utf8');if(raw.length>65536){res.writeHead(413);res.end();return;}}
   const input=JSON.parse(raw||'{}'),anime=String(input.anime||'').trim(),season=Number(input.season),language=String(input.language||'').trim();
-  if(!/^[\\w\\s:.'-]{1,100}$/.test(anime)||!Number.isSafeInteger(season)||season<1||season>100||!['Hindi','Tamil','Telugu','Kannada','English','Japanese','All'].includes(language)){res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'Invalid anime, season or language'}));return;}
+  if(!/^[\w\s:.'-]{1,100}$/.test(anime)||!Number.isSafeInteger(season)||season<1||season>100||!['Hindi','Tamil','Telugu','Kannada','English','Japanese','All'].includes(language)){res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'Invalid anime, season or language'}));return;}
   const jobKey='web:'+Date.now()+':'+crypto.randomBytes(4).toString('hex');
   if(activeBulkUsers.size>=3){res.writeHead(429,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'Bot bulk capacity is full'}));return;}
   activeBulkUsers.add(jobKey);bulkBusy=true;
@@ -1910,7 +1910,7 @@ async function handlePrimeHindiBulkRequest(req,res){
    if(response.status===403)throw new Error('AnimeSalt access blocked (HTTP 403)');
    if(!response.ok)throw new Error('Series listing HTTP '+response.status);
    const $=cheerio.load(await response.text()),episodes=new Map();
-   $('a[href]').each((_,el)=>{try{const u=new URL($(el).attr('href'),seriesUrl);if(u.hostname!=='animesalt.cx')return;const m=u.pathname.match(new RegExp('^/episode/'+slug+'-'+season+'x(\\\\d+)/?
+   $('a[href]').each((_,el)=>{try{const u=new URL($(el).attr('href'),seriesUrl);if(u.hostname!=='animesalt.cx')return;const m=u.pathname.match(new RegExp('^/episode/'+slug+'-'+season+'x(\\d+)/?
   await hydrateRemote(); // Abort startup if configured storage is down; never overwrite remote with empty local state.
   markInterruptedOnStartup();
   const configuredMode = (process.env.BOT_MODE || "local").trim().toLowerCase();
@@ -1962,7 +1962,7 @@ startApp().catch(err => { console.error("Startup error:", err); process.exit(1);
    const sorted=await discoverSeasonEpisodes(slug,season,episodes),links=await collectBulkLinks(sorted,language);
    const rows=links.map(x=>({episode:Number(x.episode),language:String(x.language||language),playerUrl:String(x.playerUrl||''),status:String(x.status||'SUCCESS'),error:String(x.error||'')}));
    const quote=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
-   const csv=[['Episode','Language','Player URL','Status','Error'],...rows.map(x=>[x.episode,x.language,x.playerUrl,x.status,x.error])].map(row=>row.map(quote).join(',')).join('\\r\\n');
+   const csv=[['Episode','Language','Player URL','Status','Error'],...rows.map(x=>[x.episode,x.language,x.playerUrl,x.status,x.error])].map(row=>row.map(quote).join(',')).join('\r\n');
    const filename=slug+'-season-'+season+'-players.csv';
    res.writeHead(200,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});
    res.end(JSON.stringify({command:'/seasons '+anime+' | '+season+' | '+language,filename,csv,rows,discoveredEpisodes:sorted.length}));
