@@ -16,7 +16,7 @@ function startWorker(name, scriptName, args = [], colorCode = "\x1b[36m") {
     console.log(`${colorCode}[${name}] Spawning: node ${scriptName} ${args.length > 0 ? "(token masked)" : ""}${RESET}`);
     const child = spawn(process.execPath, [scriptPath, ...args], {
       cwd: __dirname,
-      env: process.env,
+      env: Object.assign({}, process.env, name === "CustomerBot-1" ? { ANIME_BOT_BULK_PORT: "8091" } : {}),
       stdio: ["ignore", "pipe", "pipe"]
     });
 
@@ -80,6 +80,18 @@ const http = require("node:http");
 const PORT = Number(process.env.PORT) || 8080;
 const healthServer = http.createServer((req, res) => {
   const parsedUrl = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+
+  // Authenticated Prime Hindi bulk-import bridge to the primary bot worker's private port.
+  if (parsedUrl.pathname === "/admin/bulk-extract" && req.method === "POST") {
+    const upstream = http.request({ hostname: "127.0.0.1", port: 8091, path: "/admin/bulk-extract", method: "POST", headers: req.headers, timeout: 160000 }, (proxyRes) => {
+      res.writeHead(proxyRes.statusCode || 502, proxyRes.headers);
+      proxyRes.pipe(res);
+    });
+    upstream.on("timeout", () => upstream.destroy(new Error("Bot worker timed out")));
+    upstream.on("error", () => { if (!res.headersSent) { res.writeHead(502, { "Content-Type": "application/json", "Cache-Control": "no-store" }); res.end(JSON.stringify({ error: "Primary bot worker unavailable" })); } });
+    req.pipe(upstream);
+    return;
+  }
 
   // Route: /player or /watch — Embedded Iframe Video Player for Telegram WebApp
   if (parsedUrl.pathname === "/player" || parsedUrl.pathname === "/watch") {
