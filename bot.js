@@ -1940,6 +1940,26 @@ function handleBotHttp(req,res,mode,telegramSecret,webhookPath) {
 async function startApp() {
   await hydrateRemote(); // Abort startup if configured storage is down; never overwrite remote with empty local state.
   markInterruptedOnStartup();
+
+  // Private loopback listener for start-all.js -> primary worker CSV bridge.
+  // The parent service forwards /admin/bulk-extract to ANIME_BOT_BULK_PORT.
+  const bulkPort = Number(process.env.ANIME_BOT_BULK_PORT || 0);
+  if (bulkPort > 0) {
+    const http = require("node:http");
+    const bulkServer = http.createServer((req, res) => {
+      if (req.method === "POST" && req.url === "/admin/bulk-extract") {
+        void handlePrimeHindiBulkRequest(req, res);
+        return;
+      }
+      res.writeHead(404, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(JSON.stringify({ error: "Not found" }));
+    });
+    await new Promise((resolve, reject) => {
+      bulkServer.once("error", reject);
+      bulkServer.listen(bulkPort, "127.0.0.1", resolve);
+    });
+    console.log(`Private Prime Hindi CSV listener active on 127.0.0.1:${bulkPort}`);
+  }
   const configuredMode = (process.env.BOT_MODE || "local").trim().toLowerCase();
   const mode = (configuredMode === "webhook" && process.env.TELEGRAM_WEBHOOK_SECRET) ? "webhook" : "local";
   const publicUrl = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
