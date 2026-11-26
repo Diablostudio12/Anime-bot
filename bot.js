@@ -645,10 +645,10 @@ bot.command("episode", handleEpisode);
 bot.command("moviecsv", async (ctx) => {
   const parts = String(ctx.match || "").split("|").map(value => value.trim());
   if (parts.length !== 3) {
-    return ctx.reply("Usage: /moviecsv Movie Title | Language | Authorized HTTPS Player URL\\nExample: /moviecsv Example Film | Hindi | https://licensed-source.example/watch/123");
+    return ctx.reply("Usage: /moviecsv Movie Title | Language | Authorized HTTPS Player URL\nExample: /moviecsv Example Film | Hindi | https://licensed-source.example/watch/123");
   }
   const [title, language, sourceUrl] = parts;
-  if (!/^[\\w\\s:.'()!-]{1,140}$/.test(title) ||
+  if (!/^[\w\s:.'()!-]{1,140}$/.test(title) ||
       !["Hindi","Tamil","Telugu","Kannada","English","Japanese","Bangla"].includes(language)) {
     return ctx.reply("Invalid movie title or language.");
   }
@@ -1928,7 +1928,7 @@ async function handlePrimeHindiBulkRequest(req,res) {
       const sourceUrl=String(input.authorizedPlayerUrl||'').trim();
       let parsedSource;
       try{parsedSource=new URL(sourceUrl);}catch{}
-      if(!/^[\\w\\s:.'()!-]{1,140}$/.test(anime)||!['Hindi','Tamil','Telugu','Kannada','English','Japanese','Bangla'].includes(language)||!parsedSource||parsedSource.protocol!=='https:'||parsedSource.username||parsedSource.password){
+      if(!/^[\w\s:.'()!-]{1,140}$/.test(anime)||!['Hindi','Tamil','Telugu','Kannada','English','Japanese','Bangla'].includes(language)||!parsedSource||parsedSource.protocol!=='https:'||parsedSource.username||parsedSource.password){
         res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'Movie requires title, supported language and HTTPS source URL'}));return;
       }
       const quote=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
@@ -1938,7 +1938,7 @@ async function handlePrimeHindiBulkRequest(req,res) {
       res.end(JSON.stringify({type:'movie',filename:anime.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')+'-movie-source.csv',csv,rows:[{movieTitle:anime,language,playerUrl:parsedSource.href,status:'PROVIDED',error:'URL supplied by admin; not fetched or verified.'}]}));return;
     }
     if(requestType!=='season'){res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'Unsupported bulk request type'}));return;}
-    if(!/^[\\w\\s:.'-]{1,100}$/.test(anime)||!Number.isSafeInteger(season)||season<1||season>100||!['Hindi','Tamil','Telugu','Kannada','English','Japanese','All'].includes(language)){
+    if(!/^[\w\s:.'-]{1,100}$/.test(anime)||!Number.isSafeInteger(season)||season<1||season>100||!['Hindi','Tamil','Telugu','Kannada','English','Japanese','All'].includes(language)){
       res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'Invalid anime, season or language'}));return;
     }
     if(!/^[\w\s:.'-]{1,100}$/.test(anime)||!Number.isSafeInteger(season)||season<1||season>100||!['Hindi','Tamil','Telugu','Kannada','English','Japanese','All'].includes(language)){
