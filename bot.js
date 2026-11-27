@@ -17,7 +17,8 @@ const ALLOWED_ANIME_DOMAINS = [
   "animesalt.me", "www.animesalt.me",
   "animecenter.pages.dev", "www.animecenter.pages.dev",
   "anime-stream-x.vercel.app", "www.anime-stream-x.vercel.app",
-  "watchanidub.blogspot.com", "www.watchanidub.blogspot.com"
+  "watchanidub.blogspot.com", "www.watchanidub.blogspot.com",
+  "floxanimeindia.in.net", "www.floxanimeindia.in.net"
 ];
 function isAllowedAnimeHost(hostname) {
   return ALLOWED_ANIME_DOMAINS.includes(String(hostname || "").toLowerCase());
@@ -1493,7 +1494,7 @@ bot.command("abyss", async (ctx) => {
 });
 
 bot.command("mirrors", async (ctx) => {
-  await ctx.reply("🔍 Checking health of all 7 Multi-Source Anime Streaming Providers...");
+  await ctx.reply("🔍 Checking health of all 8 Multi-Source Anime Streaming Providers...");
   const statusLines = [];
   for (const m of MIRROR_DOMAINS) {
     try {
@@ -1517,9 +1518,10 @@ bot.command("mirrors", async (ctx) => {
     `🌐 *RYVAN Multi-Source Anime Streaming Network*\n\n` +
     statusLines.join("\n") +
     `\n\n⚡ *Integrated Platforms:*\n` +
-    `• AnimStreamX (\`anime-stream-x.vercel.app\`)\n` +
-    `• WatchAniDub Hindi (\`watchanidub.blogspot.com\`)\n` +
-    `• AnimeCenter Supabase (\`animecenter.pages.dev\`)\n` +
+    `• FloxAnimeIndia (\`floxanimeindia.in.net\` - Direct HD MP4 & Abyss)\n` +
+    `• AnimStreamX (\`anime-stream-x.vercel.app\` - Vercel API)\n` +
+    `• WatchAniDub Hindi (\`watchanidub.blogspot.com\` - Curated Hindi)\n` +
+    `• AnimeCenter Supabase (\`animecenter.pages.dev\` - Multi-Server)\n` +
     `• AnimeSalt Mirror Network (\`cx / tv.to / at / me\`)`,
     { parse_mode: "Markdown" }
   );
@@ -1713,7 +1715,8 @@ bot.on("callback_query:data", async (ctx, next) => {
     ctx.match = "";
     return bot.api.sendMessage(
       ctx.chat.id,
-      "🌐 *Live Streaming Providers (7 Integrated Platforms):*\n\n" +
+      "🌐 *Live Streaming Providers (8 Integrated Platforms):*\n\n" +
+      "• `floxanimeindia.in.net` (Direct HD MP4 + Abyss Player)\n" +
       "• `anime-stream-x.vercel.app` (High-Speed Vercel API)\n" +
       "• `watchanidub.blogspot.com` (Curated Hindi Dubbed Anime)\n" +
       "• `animecenter.pages.dev` (Supabase Cloud Database)\n" +

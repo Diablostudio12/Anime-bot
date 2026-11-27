@@ -105,6 +105,17 @@ const healthServer = http.createServer((req, res) => {
 
     const safeSrc = src.replace(/"/g, "&quot;");
     const safeTitle = title.replace(/[<>"'&]/g, "");
+    const isDirectMp4 = /\.mp4(?:\?|$)/i.test(src);
+    const mediaElement = isDirectMp4
+      ? `<video src="${safeSrc}" controls autoplay playsinline style="width:100%; height:100%; background:#000; outline:none;"></video>`
+      : `<iframe
+        src="${safeSrc}"
+        allowfullscreen="true"
+        webkitallowfullscreen="true"
+        mozallowfullscreen="true"
+        allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+        referrerpolicy="no-referrer">
+      </iframe>`;
 
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -169,17 +180,10 @@ const healthServer = http.createServer((req, res) => {
   <div class="container">
     <div class="header">
       <span>🎬 ${safeTitle}</span>
-      <span class="header-badge">HD STREAM</span>
+      <span class="header-badge">${isDirectMp4 ? "DIRECT HD MP4" : "HD STREAM"}</span>
     </div>
     <div class="player-wrapper">
-      <iframe
-        src="${safeSrc}"
-        allowfullscreen="true"
-        webkitallowfullscreen="true"
-        mozallowfullscreen="true"
-        allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-        referrerpolicy="no-referrer">
-      </iframe>
+      ${mediaElement}
     </div>
   </div>
   <script>

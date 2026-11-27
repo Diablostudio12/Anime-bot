@@ -24,7 +24,8 @@ const MIRROR_DOMAINS = [
   { name: "animesalt.me", origin: "https://animesalt.me", type: "trigger-episode" },
   { name: "animecenter.pages.dev", origin: "https://animecenter.pages.dev", type: "supabase-rest" },
   { name: "anime-stream-x.vercel.app", origin: "https://anime-stream-x.vercel.app", type: "vercel-playback" },
-  { name: "watchanidub.blogspot.com", origin: "https://watchanidub.blogspot.com", type: "blogger-feed" }
+  { name: "watchanidub.blogspot.com", origin: "https://watchanidub.blogspot.com", type: "blogger-feed" },
+  { name: "floxanimeindia.in.net", origin: "https://floxanimeindia.in.net", type: "flox-cdn-embed" }
 ];
 
 const ANIMECENTER_SUPABASE_URL = "https://hamddjtjxrwftckocqno.supabase.co";
@@ -398,10 +399,60 @@ async function extractAnimeCenter(slug, season, episode) {
   throw new Error("No playable links on AnimeCenter");
 }
 
+// 8. Source: floxanimeindia.in.net (Hindi Dubbed Direct CDN MP4 + Abyss Player)
+async function extractFloxAnime(slug, season, episode) {
+  const query = slug.replace(/-/g, " ").trim();
+  let targetSlug = slug.toLowerCase().replace(/[^a-z0-9-]+/g, "-");
+
+  // 1. Search API for exact anime slug
+  try {
+    const sRes = await request(`https://floxanimeindia.in.net/api/search.php?q=${encodeURIComponent(query)}`, {
+      method: "GET",
+      headers: { "User-Agent": "Mozilla/5.0" },
+      signal: AbortSignal.timeout(3000)
+    });
+    if (sRes.statusCode === 200) {
+      const results = await sRes.body.json();
+      if (Array.isArray(results) && results.length > 0) {
+        targetSlug = results[0].slug;
+      }
+    }
+  } catch {}
+
+  // 2. Fetch watch page
+  const watchUrl = `https://floxanimeindia.in.net/watch.php?anime=${encodeURIComponent(targetSlug)}&ep=${episode}`;
+  const wRes = await request(watchUrl, {
+    method: "GET",
+    headers: { "User-Agent": "Mozilla/5.0" },
+    signal: AbortSignal.timeout(3500)
+  });
+  if (wRes.statusCode !== 200) throw new Error(`Flox status ${wRes.statusCode}`);
+  const html = await wRes.body.text();
+
+  const serverUrls = [...html.matchAll(/data-url=["']([^"']+)["']/gi)].map(m => m[1]);
+  const links = [];
+  for (const sUrl of [...new Set(serverUrls)]) {
+    if (/^https?:\/\//i.test(sUrl)) {
+      links.push({
+        mirror: "floxanimeindia.in.net",
+        language: targetSlug.includes("hindi") ? "Hindi Dub" : "Sub/Dub",
+        playerUrl: sUrl,
+        isAbyss: isAbyssUrl(sUrl),
+        isDirectMp4: /\.mp4/i.test(sUrl)
+      });
+    }
+  }
+
+  if (links.length > 0) {
+    return { mirror: "floxanimeindia.in.net", links };
+  }
+  throw new Error("No playable streams found on FloxAnime");
+}
+
 /**
  * 50x HYPER-SPEED RESOLVER:
  * 1. Checks Instant RAM Cache (0.001ms)
- * 2. Parallel Race Tier 1: anime-stream-x.vercel.app + animesalttv.to + animesalt.cx (~120ms)
+ * 2. Parallel Race Tier 1: floxanimeindia.in.net + anime-stream-x.vercel.app + animesalttv.to + animesalt.cx (~120ms)
  * 3. Fallback Race Tier 2: watchanidub.blogspot.com (Hindi Dub) + animecenter.pages.dev + animesalt.at + animesalt.me
  */
 async function fetchEpisodeAbyssFromAllMirrors(slug, season, episode, preferredLanguage = "All") {
@@ -431,9 +482,10 @@ async function fetchEpisodeAbyssFromAllMirrors(slug, season, episode, preferredL
 
   const startTime = Date.now();
 
-  // 2. Parallel Hot-Socket Race Tier 1 (AnimStreamX, animesalttv.to, animesalt.cx)
+  // 2. Parallel Hot-Socket Race Tier 1 (FloxAnime, AnimStreamX, animesalttv.to, animesalt.cx)
   try {
     const tier1Result = await Promise.any([
+      extractFloxAnime(cleanSlug, sNum, eNum),
       extractAnimStreamX(cleanSlug, sNum, eNum),
       extractTvTo(cleanSlug, sNum, eNum),
       extractCx(cleanSlug, sNum, eNum)

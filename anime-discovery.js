@@ -133,7 +133,18 @@ async function discoverAnimeSeries(query) {
     } catch {}
   }
 
-  // 2. Fallback: Search WatchAniDub (Curated Hindi Dubbed Anime)
+  // 2. Fallback: Search FloxAnimeIndia (Hindi Dubbed & Subbed Anime)
+  try {
+    const floxResult = await discoverFloxAnime(query);
+    if (floxResult && floxResult.found) {
+      seriesMemoryCache.set(clean, floxResult);
+      seriesMemoryCache.set(floxResult.slug, floxResult);
+      saveSeriesCache();
+      return floxResult;
+    }
+  } catch {}
+
+  // 3. Fallback: Search WatchAniDub (Curated Hindi Dubbed Anime)
   try {
     const wadResult = await discoverWatchAniDub(query);
     if (wadResult && wadResult.found) {
@@ -144,7 +155,7 @@ async function discoverAnimeSeries(query) {
     }
   } catch {}
 
-  // 3. Fallback: Search AnimeCenter (Supabase Cloud Database)
+  // 4. Fallback: Search AnimeCenter (Supabase Cloud Database)
   try {
     const acResult = await discoverAnimeCenter(query);
     if (acResult && acResult.found) {
@@ -156,6 +167,42 @@ async function discoverAnimeSeries(query) {
   } catch {}
 
   return { found: false, slug: clean };
+}
+
+async function discoverFloxAnime(query) {
+  try {
+    const clean = String(query || "").replace(/-/g, " ").trim();
+    const searchUrl = `https://floxanimeindia.in.net/api/search.php?q=${encodeURIComponent(clean)}`;
+    const res = await fetch(searchUrl, { signal: AbortSignal.timeout(3500) });
+    if (!res.ok) return null;
+    const items = await res.json();
+    if (!Array.isArray(items) || items.length === 0) return null;
+    const target = items[0];
+    const slug = target.slug;
+
+    // Fetch anime details page to list episodes
+    const detailsRes = await fetch(`https://floxanimeindia.in.net/anime.php?slug=${encodeURIComponent(slug)}`, {
+      headers: { "User-Agent": "Mozilla/5.0" },
+      signal: AbortSignal.timeout(4000)
+    });
+    if (!detailsRes.ok) return null;
+    const html = await detailsRes.text();
+
+    const epMatches = [...html.matchAll(/watch\.php\?anime=[^"'\s&]+&ep=(\d+)/gi)].map(m => Number(m[1]));
+    const epList = [...new Set(epMatches)].sort((a, b) => a - b);
+    if (epList.length === 0) return null;
+
+    return {
+      found: true,
+      slug,
+      title: target.title || clean,
+      mirror: "floxanimeindia.in.net",
+      seasons: [1],
+      totalEpisodes: epList.length,
+      episodesBySeason: { 1: epList }
+    };
+  } catch {}
+  return null;
 }
 
 async function discoverWatchAniDub(query) {
@@ -247,5 +294,6 @@ module.exports = {
   discoverAnimeSeries,
   seriesMemoryCache,
   discoverWatchAniDub,
-  discoverAnimeCenter
+  discoverAnimeCenter,
+  discoverFloxAnime
 };
