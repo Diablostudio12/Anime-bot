@@ -5,6 +5,8 @@ const path = require("node:path");
 const { fetch } = require("undici");
 
 const MIRRORS = ["animesalt.cx", "animesalttv.to", "animesalt.at", "animesalt.me"];
+const ANIMECENTER_SUPABASE_URL = "https://hamddjtjxrwftckocqno.supabase.co";
+const ANIMECENTER_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhhbWRkanRqeHJ3ZnRja29jcW5vIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU2MjEzOTksImV4cCI6MjA5MTE5NzM5OX0.Rc7kezQo7pPvd_W66Au9h1dnqPpDSUl_SfsYuqJ4JQc";
 const CACHE_FILE = path.join(__dirname, "ryvan-data", "series-cache.json");
 
 // In-memory cache for instant 0ms responses
@@ -131,10 +133,119 @@ async function discoverAnimeSeries(query) {
     } catch {}
   }
 
+  // 2. Fallback: Search WatchAniDub (Curated Hindi Dubbed Anime)
+  try {
+    const wadResult = await discoverWatchAniDub(query);
+    if (wadResult && wadResult.found) {
+      seriesMemoryCache.set(clean, wadResult);
+      seriesMemoryCache.set(wadResult.slug, wadResult);
+      saveSeriesCache();
+      return wadResult;
+    }
+  } catch {}
+
+  // 3. Fallback: Search AnimeCenter (Supabase Cloud Database)
+  try {
+    const acResult = await discoverAnimeCenter(query);
+    if (acResult && acResult.found) {
+      seriesMemoryCache.set(clean, acResult);
+      seriesMemoryCache.set(acResult.slug, acResult);
+      saveSeriesCache();
+      return acResult;
+    }
+  } catch {}
+
   return { found: false, slug: clean };
+}
+
+async function discoverWatchAniDub(query) {
+  try {
+    const clean = String(query || "").replace(/-/g, " ").trim();
+    const searchUrl = `https://watchanidub.blogspot.com/feeds/posts/default?alt=json&q=${encodeURIComponent(clean)}&max-results=5`;
+    const res = await fetch(searchUrl, { signal: AbortSignal.timeout(4000) });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const entries = data.feed?.entry || [];
+    for (const entry of entries) {
+      const content = entry.content?.$t || "";
+      const match = content.match(/<div class="ms-data"[^>]*>([\s\S]*?)<\/div>/i);
+      if (!match) continue;
+      const msData = JSON.parse(match[1]);
+      const seasonsObj = msData.s || {};
+      const seasons = Object.keys(seasonsObj).map(Number).sort((a, b) => a - b);
+      if (seasons.length === 0) continue;
+      let totalEpisodes = 0;
+      const episodesBySeason = {};
+      for (const s of seasons) {
+        const epCount = (seasonsObj[String(s)] || []).length;
+        episodesBySeason[s] = Array.from({ length: epCount }, (_, i) => i + 1);
+        totalEpisodes += epCount;
+      }
+      return {
+        found: true,
+        slug: msData.id || query.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+        title: entry.title?.$t || msData.id,
+        mirror: "watchanidub.blogspot.com",
+        seasons,
+        totalEpisodes,
+        episodesBySeason
+      };
+    }
+  } catch {}
+  return null;
+}
+
+async function discoverAnimeCenter(query) {
+  try {
+    const clean = String(query || "").replace(/-/g, " ").trim();
+    const res = await fetch(`${ANIMECENTER_SUPABASE_URL}/rest/v1/series?title=ilike.*${encodeURIComponent(clean)}*&select=*&limit=1`, {
+      headers: { "apikey": ANIMECENTER_ANON_KEY, "Authorization": `Bearer ${ANIMECENTER_ANON_KEY}` },
+      signal: AbortSignal.timeout(4000)
+    });
+    if (!res.ok) return null;
+    const items = await res.json();
+    if (!items || items.length === 0) return null;
+    const s = items[0];
+    const slug = s.slug;
+
+    const epRes = await fetch(`${ANIMECENTER_SUPABASE_URL}/rest/v1/episodes?series_slug=eq.${slug}&select=season_number,episode_number&order=season_number.asc,episode_number.asc`, {
+      headers: { "apikey": ANIMECENTER_ANON_KEY, "Authorization": `Bearer ${ANIMECENTER_ANON_KEY}` },
+      signal: AbortSignal.timeout(4000)
+    });
+    if (!epRes.ok) return null;
+    const eps = await epRes.json();
+    const seasonMap = {};
+    for (const ep of eps) {
+      const sNum = ep.season_number;
+      const eNum = ep.episode_number;
+      if (!seasonMap[sNum]) seasonMap[sNum] = new Set();
+      seasonMap[sNum].add(eNum);
+    }
+    const seasons = Object.keys(seasonMap).map(Number).sort((a, b) => a - b);
+    if (seasons.length === 0) return null;
+    let totalEpisodes = 0;
+    const episodesBySeason = {};
+    for (const sn of seasons) {
+      const epList = [...seasonMap[sn]].sort((a, b) => a - b);
+      episodesBySeason[sn] = epList;
+      totalEpisodes += epList.length;
+    }
+    return {
+      found: true,
+      slug,
+      title: s.title,
+      mirror: "animecenter.pages.dev",
+      seasons,
+      totalEpisodes,
+      episodesBySeason
+    };
+  } catch {}
+  return null;
 }
 
 module.exports = {
   discoverAnimeSeries,
-  seriesMemoryCache
+  seriesMemoryCache,
+  discoverWatchAniDub,
+  discoverAnimeCenter
 };

@@ -21,8 +21,14 @@ const MIRROR_DOMAINS = [
   { name: "animesalt.cx", origin: "https://animesalt.cx", type: "torofilm" },
   { name: "animesalttv.to", origin: "https://animesalttv.to", type: "torofilm-abyss" },
   { name: "animesalt.at", origin: "https://animesalt.at", type: "abyss-route" },
-  { name: "animesalt.me", origin: "https://animesalt.me", type: "trigger-episode" }
+  { name: "animesalt.me", origin: "https://animesalt.me", type: "trigger-episode" },
+  { name: "animecenter.pages.dev", origin: "https://animecenter.pages.dev", type: "supabase-rest" },
+  { name: "anime-stream-x.vercel.app", origin: "https://anime-stream-x.vercel.app", type: "vercel-playback" },
+  { name: "watchanidub.blogspot.com", origin: "https://watchanidub.blogspot.com", type: "blogger-feed" }
 ];
+
+const ANIMECENTER_SUPABASE_URL = "https://hamddjtjxrwftckocqno.supabase.co";
+const ANIMECENTER_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhhbWRkanRqeHJ3ZnRja29jcW5vIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU2MjEzOTksImV4cCI6MjA5MTE5NzM5OX0.Rc7kezQo7pPvd_W66Au9h1dnqPpDSUl_SfsYuqJ4JQc";
 
 // 2. Persistent Dual-Tier Cache (RAM Map + Auto-Synced Disk Store)
 const CACHE_FILE = path.join(__dirname, "ryvan-data", "abyss-cache.json");
@@ -285,11 +291,118 @@ async function extractMe(slug, season, episode) {
   throw new Error("Episode trigger not found on me");
 }
 
+// 5. Source: anime-stream-x.vercel.app (High-Speed Vercel JSON API)
+async function extractAnimStreamX(slug, season, episode) {
+  const episodeId = `${slug}-season-${season}-episode-${episode}`;
+  const res = await request("https://anime-stream-x.vercel.app/api/playback", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+    },
+    body: JSON.stringify({ titleId: slug, episodeId }),
+    signal: AbortSignal.timeout(3500)
+  });
+  if (res.statusCode !== 200) throw new Error(`AnimStreamX status ${res.statusCode}`);
+  const data = await res.body.json();
+  if (data && data.source && /^https?:\/\//i.test(data.source)) {
+    return {
+      mirror: "anime-stream-x.vercel.app",
+      links: [{
+        mirror: "anime-stream-x.vercel.app",
+        language: "Japanese/English",
+        playerUrl: data.source,
+        isAbyss: isAbyssUrl(data.source)
+      }]
+    };
+  }
+  throw new Error("No playback source on AnimStreamX");
+}
+
+// 6. Source: watchanidub.blogspot.com (Direct Hindi Dubbed Abyss Links)
+async function extractWatchAniDub(slug, season, episode) {
+  const query = slug.replace(/-/g, " ").trim();
+  const searchUrl = `https://watchanidub.blogspot.com/feeds/posts/default?alt=json&q=${encodeURIComponent(query)}&max-results=5`;
+  const res = await request(searchUrl, {
+    method: "GET",
+    headers: { "User-Agent": "Mozilla/5.0" },
+    signal: AbortSignal.timeout(4000)
+  });
+  if (res.statusCode !== 200) throw new Error(`WatchAniDub status ${res.statusCode}`);
+  const data = await res.body.json();
+  const entries = data.feed?.entry || [];
+  for (const entry of entries) {
+    const content = entry.content?.$t || "";
+    const match = content.match(/<div class="ms-data"[^>]*>([\s\S]*?)<\/div>/i);
+    if (!match) continue;
+    try {
+      const msData = JSON.parse(match[1]);
+      const seasons = msData.s || {};
+      const epArr = seasons[String(season)] || [];
+      const epIdx = Number(episode) - 1;
+      if (epArr[epIdx] && Array.isArray(epArr[epIdx])) {
+        const links = [];
+        for (const srv of epArr[epIdx]) {
+          const pUrl = srv[1];
+          const pLang = srv[2] || "Hindi Dub";
+          if (pUrl && /^https?:\/\//i.test(pUrl)) {
+            links.push({
+              mirror: "watchanidub.blogspot.com",
+              language: pLang,
+              playerUrl: pUrl,
+              isAbyss: isAbyssUrl(pUrl)
+            });
+          }
+        }
+        if (links.length > 0) {
+          return { mirror: "watchanidub.blogspot.com", links };
+        }
+      }
+    } catch {}
+  }
+  throw new Error("Episode not found on WatchAniDub");
+}
+
+// 7. Source: animecenter.pages.dev (Supabase Cloud Database Multi-Server Embeds)
+async function extractAnimeCenter(slug, season, episode) {
+  const url = `${ANIMECENTER_SUPABASE_URL}/rest/v1/episodes?series_slug=eq.${slug}&season_number=eq.${season}&episode_number=eq.${episode}&select=*`;
+  const res = await request(url, {
+    method: "GET",
+    headers: {
+      "apikey": ANIMECENTER_ANON_KEY,
+      "Authorization": `Bearer ${ANIMECENTER_ANON_KEY}`,
+      "User-Agent": "Mozilla/5.0"
+    },
+    signal: AbortSignal.timeout(3500)
+  });
+  if (res.statusCode !== 200) throw new Error(`AnimeCenter status ${res.statusCode}`);
+  const eps = await res.body.json();
+  if (!eps || eps.length === 0) throw new Error("Episode not found on AnimeCenter");
+  const epData = eps[0];
+  const iframeUrls = Array.isArray(epData.iframe_url) ? epData.iframe_url : [];
+  const links = [];
+  for (const item of iframeUrls) {
+    const real = item.real_video || item.url || item.src;
+    if (real && /^https?:\/\//i.test(real)) {
+      links.push({
+        mirror: "animecenter.pages.dev",
+        language: item.lang || "Sub/Dub",
+        playerUrl: real,
+        isAbyss: isAbyssUrl(real)
+      });
+    }
+  }
+  if (links.length > 0) {
+    return { mirror: "animecenter.pages.dev", links };
+  }
+  throw new Error("No playable links on AnimeCenter");
+}
+
 /**
  * 50x HYPER-SPEED RESOLVER:
  * 1. Checks Instant RAM Cache (0.001ms)
- * 2. Parallel Race: animesalttv.to + animesalt.cx (Hot Sockets, ~180ms)
- * 3. Fallback Race: animesalt.at + animesalt.me
+ * 2. Parallel Race Tier 1: anime-stream-x.vercel.app + animesalttv.to + animesalt.cx (~120ms)
+ * 3. Fallback Race Tier 2: watchanidub.blogspot.com (Hindi Dub) + animecenter.pages.dev + animesalt.at + animesalt.me
  */
 async function fetchEpisodeAbyssFromAllMirrors(slug, season, episode, preferredLanguage = "All") {
   const cleanSlug = String(slug || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -318,15 +431,16 @@ async function fetchEpisodeAbyssFromAllMirrors(slug, season, episode, preferredL
 
   const startTime = Date.now();
 
-  // 2. Parallel Hot-Socket Race Tier 1 (animesalttv.to & animesalt.cx)
+  // 2. Parallel Hot-Socket Race Tier 1 (AnimStreamX, animesalttv.to, animesalt.cx)
   try {
     const tier1Result = await Promise.any([
+      extractAnimStreamX(cleanSlug, sNum, eNum),
       extractTvTo(cleanSlug, sNum, eNum),
       extractCx(cleanSlug, sNum, eNum)
     ]);
 
     const elapsed = Date.now() - startTime;
-    console.log(`⚡ [50x Turbo HIT] ${tier1Result.mirror} won race in ${elapsed}ms for ${cleanSlug} S${sNum}E${eNum}`);
+    console.log(`⚡ [Tier 1 Turbo HIT] ${tier1Result.mirror} won race in ${elapsed}ms for ${cleanSlug} S${sNum}E${eNum}`);
 
     abyssMemoryCache.set(cacheKey, {
       sourceMirror: tier1Result.mirror,
@@ -351,9 +465,11 @@ async function fetchEpisodeAbyssFromAllMirrors(slug, season, episode, preferredL
     // Fallback to Tier 2
   }
 
-  // 3. Parallel Race Tier 2 (animesalt.at & animesalt.me)
+  // 3. Parallel Race Tier 2 (WatchAniDub Hindi, AnimeCenter Supabase, animesalt.at, animesalt.me)
   try {
     const tier2Result = await Promise.any([
+      extractWatchAniDub(cleanSlug, sNum, eNum),
+      extractAnimeCenter(cleanSlug, sNum, eNum),
       extractAt(cleanSlug, sNum, eNum),
       extractMe(cleanSlug, sNum, eNum)
     ]);

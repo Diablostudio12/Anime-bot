@@ -14,7 +14,10 @@ const ALLOWED_ANIME_DOMAINS = [
   "animesalt.cx", "www.animesalt.cx",
   "animesalttv.to", "www.animesalttv.to",
   "animesalt.at", "www.animesalt.at",
-  "animesalt.me", "www.animesalt.me"
+  "animesalt.me", "www.animesalt.me",
+  "animecenter.pages.dev", "www.animecenter.pages.dev",
+  "anime-stream-x.vercel.app", "www.anime-stream-x.vercel.app",
+  "watchanidub.blogspot.com", "www.watchanidub.blogspot.com"
 ];
 function isAllowedAnimeHost(hostname) {
   return ALLOWED_ANIME_DOMAINS.includes(String(hostname || "").toLowerCase());
@@ -1490,7 +1493,7 @@ bot.command("abyss", async (ctx) => {
 });
 
 bot.command("mirrors", async (ctx) => {
-  await ctx.reply("🔍 Checking health of all 4 AnimeSalt mirror sites...");
+  await ctx.reply("🔍 Checking health of all 7 Multi-Source Anime Streaming Providers...");
   const statusLines = [];
   for (const m of MIRROR_DOMAINS) {
     try {
@@ -1501,7 +1504,7 @@ bot.command("mirrors", async (ctx) => {
       });
       const ms = Date.now() - start;
       if (res.ok) {
-        statusLines.push(`✅ *${m.name}* — Online (${ms}ms) [Abyss: Supported]`);
+        statusLines.push(`✅ *${m.name}* — Online (${ms}ms) [${m.type}]`);
       } else {
         statusLines.push(`⚠️ *${m.name}* — HTTP ${res.status} (${ms}ms)`);
       }
@@ -1511,9 +1514,13 @@ bot.command("mirrors", async (ctx) => {
   }
 
   await ctx.reply(
-    `🌐 *AnimeSalt Multi-Mirror Network*\n\n` +
+    `🌐 *RYVAN Multi-Source Anime Streaming Network*\n\n` +
     statusLines.join("\n") +
-    `\n\nFallback Order: \`cx ➔ tv.to ➔ at ➔ me\``,
+    `\n\n⚡ *Integrated Platforms:*\n` +
+    `• AnimStreamX (\`anime-stream-x.vercel.app\`)\n` +
+    `• WatchAniDub Hindi (\`watchanidub.blogspot.com\`)\n` +
+    `• AnimeCenter Supabase (\`animecenter.pages.dev\`)\n` +
+    `• AnimeSalt Mirror Network (\`cx / tv.to / at / me\`)`,
     { parse_mode: "Markdown" }
   );
 });
@@ -1704,7 +1711,16 @@ bot.on("callback_query:data", async (ctx, next) => {
 
   if (data === "menu:mirrors") {
     ctx.match = "";
-    return bot.api.sendMessage(ctx.chat.id, "🌐 Live AnimeSalt Mirrors:\n• animesalt.cx\n• animesalttv.to\n• animesalt.at\n• animesalt.me\n\nUse /mirrors to test live response speed.");
+    return bot.api.sendMessage(
+      ctx.chat.id,
+      "🌐 *Live Streaming Providers (7 Integrated Platforms):*\n\n" +
+      "• `anime-stream-x.vercel.app` (High-Speed Vercel API)\n" +
+      "• `watchanidub.blogspot.com` (Curated Hindi Dubbed Anime)\n" +
+      "• `animecenter.pages.dev` (Supabase Cloud Database)\n" +
+      "• `animesalt.cx` / `animesalttv.to` / `animesalt.at` / `animesalt.me`\n\n" +
+      "Use /mirrors to test live response speed.",
+      { parse_mode: "Markdown" }
+    );
   }
 });
 
