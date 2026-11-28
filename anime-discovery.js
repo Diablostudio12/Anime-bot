@@ -290,10 +290,150 @@ async function discoverAnimeCenter(query) {
   return null;
 }
 
+const ANIMESALT_CATALOG_DOMAINS = [
+  "animesalt.cx",
+  "animesalttv.to",
+  "animesalt.at",
+  "animesalt.me"
+];
+
+function slugToCleanTitle(slug) {
+  return String(slug || "")
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .trim();
+}
+
+/**
+ * Check karta hai ki kisi anime slug par diye gaye domain me Abyss source hai ya nahi.
+ * Sirf boolean return karta hai (koi URL store ya return nahi karta).
+ */
+async function verifyAnimeHasAbyssOnHost(host, slug) {
+  const probeUrls = [
+    `https://${host}/episode/${slug}-1x1/`,
+    `https://${host}/tv/${slug}-season-1/`,
+    `https://${host}/tv/${slug}/`,
+    `https://${host}/series/${slug}/`
+  ];
+
+  for (const targetUrl of probeUrls) {
+    try {
+      const res = await fetch(getFetchUrl(targetUrl), {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+        signal: AbortSignal.timeout(4500)
+      });
+      if (!res.ok) continue;
+      const html = await res.text();
+
+      // Wahi exact patterns jo mirror-manager.js ke extractCx / extractTvTo / extractAt / extractMe use karte hain
+      if (
+        /(?:abyss-multilang\.php|player\.php)\?data=[A-Za-z0-9+/=]+/i.test(html) ||
+        /\/player\/abyss\/[A-Za-z0-9_-]+/i.test(html) ||
+        /triggerEpisode\s*\(/i.test(html) ||
+        /abyssplayer\.com|abyss\.to|abysscdn/i.test(html)
+      ) {
+        return true;
+      }
+    } catch {}
+  }
+  return false;
+}
+
+/**
+ * Chaaro AnimeSalt domains check karke un sabhi anime ke clean names return karta hai
+ * jinka Abyss source available hai. Output me koi URL nahi hota.
+ */
+async function discoverAllAbyssAnimeNames() {
+  const cheerio = require("cheerio");
+  const animeCandidates = new Map(); // slug -> { title, hosts: Set }
+
+  // 1. Chaaro domains se anime catalog / sitemap / listing pages scan karna
+  for (const host of ANIMESALT_CATALOG_DOMAINS) {
+    const listingPaths = [
+      "/series/",
+      "/anime/",
+      "/tv/",
+      "/az-list/",
+      "/"
+    ];
+
+    for (const p of listingPaths) {
+      for (let page = 1; page <= 15; page++) {
+        const pageUrl = page === 1
+          ? `https://${host}${p}`
+          : `https://${host}${p}page/${page}/`;
+
+        try {
+          const res = await fetch(getFetchUrl(pageUrl), {
+            headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+            signal: AbortSignal.timeout(5000)
+          });
+          if (!res.ok) break;
+
+          const html = await res.text();
+          const $ = cheerio.load(html);
+          let foundInPage = 0;
+
+          $("a[href]").each((_, el) => {
+            const href = String($(el).attr("href") || "");
+            const match = href.match(/\/(?:series|anime|tv)\/([a-z0-9-]+)\/?$/i);
+            if (!match) return;
+
+            let slug = match[1].toLowerCase().replace(/-season-\d+$/, "");
+            if (!slug || slug.length < 2 || /^(page|category|genre|tag)$/.test(slug)) return;
+
+            const rawTitle = ($(el).attr("title") || $(el).text() || "").replace(/\s+/g, " ").trim();
+            const cleanTitle = (rawTitle && rawTitle.length >= 2 && rawTitle.length <= 100 && !/^watch|download|episode/i.test(rawTitle))
+              ? rawTitle
+              : slugToCleanTitle(slug);
+
+            if (!animeCandidates.has(slug)) {
+              animeCandidates.set(slug, { title: cleanTitle, hosts: new Set() });
+            }
+            animeCandidates.get(slug).hosts.add(host);
+            foundInPage++;
+          });
+
+          // Agar is path par koi naya anime card nahi mila toh next page ruk jaye
+          if (foundInPage === 0 || p === "/") break;
+        } catch {
+          break;
+        }
+      }
+    }
+  }
+
+  // 2. Parallel verification: sirf wahi anime filter karein jinka Abyss source live hai
+  const verifiedNames = new Set();
+  const entries = [...animeCandidates.entries()];
+  const BATCH_SIZE = 8;
+
+  for (let i = 0; i < entries.length; i += BATCH_SIZE) {
+    const batch = entries.slice(i, i + BATCH_SIZE);
+    await Promise.allSettled(
+      batch.map(async ([slug, info]) => {
+        const hostsToCheck = [...info.hosts];
+        for (const host of hostsToCheck) {
+          const hasAbyss = await verifyAnimeHasAbyssOnHost(host, slug);
+          if (hasAbyss) {
+            verifiedNames.add(info.title);
+            break;
+          }
+        }
+      })
+    );
+  }
+
+  // Strictly sirf anime names ki sorted array return karna (zero URLs)
+  return [...verifiedNames].sort((a, b) => a.localeCompare(b));
+}
+
+
 module.exports = {
   discoverAnimeSeries,
   seriesMemoryCache,
   discoverWatchAniDub,
   discoverAnimeCenter,
-  discoverFloxAnime
+  discoverFloxAnime,
+  discoverAllAbyssAnimeNames
 };
