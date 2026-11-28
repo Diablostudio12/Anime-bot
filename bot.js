@@ -209,6 +209,61 @@ bot.command("reset", async (ctx) => {
   setUserHistory(ctx.from?.id, []);
   await ctx.reply("🧹 Cache reset.");
 });
+let abyssListScanBusy = false;
+
+bot.command("abysslist", async (ctx) => {
+  if (abyssListScanBusy) {
+    return ctx.reply("⏳ Pehle se ek AnimeSalt Abyss catalog scan chal raha hai. Thoda wait karein.");
+  }
+
+  abyssListScanBusy = true;
+  const statusMsg = await ctx.reply(
+    "🔍 AnimeSalt ke chaaro domains scan ho rahe hain...\n" +
+    "Sirf wahi anime names nikale ja rahe hain jinka Abyss source available hai."
+  );
+
+  try {
+    const animeNames = await discoverAllAbyssAnimeNames();
+
+    if (!animeNames || animeNames.length === 0) {
+      return await ctx.api.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        "❌ Abhi koi Abyss-supported anime list nahi mil payi (domains blocked ya timeout ho sakte hain)."
+      ).catch(() => ctx.reply("❌ Abhi koi Abyss-supported anime list nahi mil payi."));
+    }
+
+    // Strictly sirf anime names (kisi bhi domain ya anime ka URL output me nahi hoga)
+    const header = `🎬 Available Abyss Anime List (Total: ${animeNames.length})\n\n`;
+    const lines = animeNames.map((name, idx) => `${idx + 1}. ${name}`);
+
+    const chunks = [];
+    let current = header;
+    for (const line of lines) {
+      if ((current + line + "\n").length > 3900) {
+        chunks.push(current.trim());
+        current = line + "\n";
+      } else {
+        current += line + "\n";
+      }
+    }
+    if (current.trim()) chunks.push(current.trim());
+
+    await ctx.api.editMessageText(ctx.chat.id, statusMsg.message_id, chunks[0], {
+      link_preview_options: { is_disabled: true }
+    }).catch(() => ctx.reply(chunks[0], { link_preview_options: { is_disabled: true } }));
+
+    for (let i = 1; i < chunks.length; i++) {
+      await ctx.reply(chunks[i], { link_preview_options: { is_disabled: true } });
+    }
+  } catch (error) {
+    console.error("Abyss list scan error:", error.message);
+    await ctx.reply(isAccessBlocked(error) ? ACCESS_BLOCKED_MESSAGE : "❌ Anime list fetch karne mein error aaya.");
+  } finally {
+    abyssListScanBusy = false;
+  }
+});
+
 async function generateWithFallback(prompt) {
   return { text: "Native Mode: Direct processing (0 AI tokens used)." };
 }
